@@ -1,4 +1,4 @@
-/// end.sol -- global settlement engine
+/// globalSettlement.sol -- global settlement engine
 
 // Copyright (C) 2018 Rain <rainbreak@riseup.net>
 // Copyright (C) 2018 Lev Livnev <lev@liv.nev.org.uk>
@@ -18,13 +18,13 @@
 
 pragma solidity 0.5.12;
 
-import "./lib.sol";
+import "./commonFunctions.sol";
 
-contract VatLike {
+contract CDPEngineContract {
     function dai(address) external view returns (uint256);
     function ilks(bytes32 ilk) external returns (
-        uint256 Art,
-        uint256 rate,
+        uint256 debtAmount,
+        uint256 accumulatedRates ,
         uint256 spot,
         uint256 line,
         uint256 dust
@@ -43,9 +43,9 @@ contract VatLike {
 }
 contract CatLike {
     function ilks(bytes32) external returns (
-        address flip,  // Liquidator
-        uint256 chop,  // Liquidation Penalty   [ray]
-        uint256 lump   // Liquidation Quantity  [rad]
+        address liquidator,  // Liquidator
+        uint256 liquidatorPenalty,  // Liquidation Penalty   [ray]
+        uint256 liquidatorAmount   // Liquidation Quantity  [rad]
     );
     function cage() external;
 }
@@ -55,15 +55,15 @@ contract PotLike {
 contract VowLike {
     function cage() external;
 }
-contract Flippy {
+contract Seller {
     function bids(uint id) external view returns (
         uint256 bid,
-        uint256 lot,
+        uint256 tokensForSale,
         address guy,
         uint48  tic,
         uint48  end,
         address usr,
-        address gal,
+        address daiIncomeReceiver,
         uint256 tab
     );
     function yank(uint id) external;
@@ -83,16 +83,16 @@ contract Spotty {
 }
 
 /*
-    This is the `End` and it coordinates Global Settlement. This is an
+    This is the `GlobalSettlement` and it coordinates Global Settlement. This is an
     involved, stateful process that takes place over nine steps.
 
     First we freeze the system and lock the prices for each ilk.
 
     1. `cage()`:
         - freezes user entrypoints
-        - cancels flop/flap auctions
+        - cancels flop/buyCollateral auctions
         - starts cooldown period
-        - stops pot drips
+        - stops pot collectRates
 
     2. `cage(ilk)`:
        - set the cage price for each `ilk`, reading off the price feed
@@ -134,7 +134,7 @@ contract Spotty {
            their collateral faster.
 
            `skip(ilk, id)`:
-            - cancel individual flip auctions in the `tend` (forward) phase
+            - cancel individual liquidator auctions in the `tend` (forward) phase
             - retrieves collateral and returns dai to bidder
             - `dent` (reverse) phase auctions can continue normally
 
@@ -157,7 +157,7 @@ contract Spotty {
        - only callable after processing time period elapsed
        - assumption that all under-collateralised CDPs are processed
        - fixes the total outstanding supply of dai
-       - may also require extra CDP processing to cover vow surplus
+       - may also require extra CDP processing to cover debtEngine surplus
 
     7. `flow(ilk)`:
         - calculate the `fix`, the cash price for a given ilk
@@ -171,51 +171,43 @@ contract Spotty {
     dai cannot be unpacked and is not transferrable. More dai can be
     added to a bag later.
 
-    8. `pack(wad)`:
+    8. `pack(amount)`:
         - put some dai into a bag in preparation for `cash`
 
     Finally, collateral can be obtained with `cash`. The bigger the bag,
     the more collateral can be released.
 
-    9. `cash(ilk, wad)`:
+    9. `cash(ilk, amount)`:
         - exchange some dai from your bag for gems from a specific ilk
         - the number of gems is limited by how big your bag is
 */
 
-contract End is LibNote {
-    // --- Auth ---
-    mapping (address => uint) public wards;
-    function rely(address guy) external note auth { wards[guy] = 1; }
-    function deny(address guy) external note auth { wards[guy] = 0; }
-    modifier auth {
-        require(wards[msg.sender] == 1, "End/not-authorized");
-        _;
-    }
+contract GlobalSettlement is LogEmitter, Permissioned {
 
     // --- Data ---
-    VatLike  public vat;
+    CDPEngineContract  public CDPEngine;
     CatLike  public cat;
-    VowLike  public vow;
+    VowLike  public debtEngine;
     PotLike  public pot;
     Spotty   public spot;
 
-    uint256  public live;  // cage flag
+    uint256  public DSRisActive;  // cage flag
     uint256  public when;  // time of cage
     uint256  public wait;  // processing cooldown length
     uint256  public debt;  // total outstanding dai following processing [rad]
 
     mapping (bytes32 => uint256) public tag;  // cage price           [ray]
-    mapping (bytes32 => uint256) public gap;  // collateral shortfall [wad]
-    mapping (bytes32 => uint256) public Art;  // total debt per ilk   [wad]
+    mapping (bytes32 => uint256) public gap;  // collateral shortfall [amount]
+    mapping (bytes32 => uint256) public debtAmount;  // total debt per ilk   [amount]
     mapping (bytes32 => uint256) public fix;  // final cash price     [ray]
 
-    mapping (address => uint256)                      public bag;  // [wad]
-    mapping (bytes32 => mapping (address => uint256)) public out;  // [wad]
+    mapping (address => uint256)                      public bag;  // [amount]
+    mapping (bytes32 => mapping (address => uint256)) public out;  // [amount]
 
     // --- Init ---
     constructor() public {
-        wards[msg.sender] = 1;
-        live = 1;
+        authorizedAccounts[msg.sender] = true;
+        DSRisActive = true;
     }
 
     // --- Math ---
@@ -245,107 +237,107 @@ contract End is LibNote {
     }
 
     // --- Administration ---
-    function file(bytes32 what, address data) external note auth {
-        require(live == 1, "End/not-live");
-        if (what == "vat")  vat = VatLike(data);
+    function file(bytes32 what, address data) external emitLog onlyOwners {
+        require(DSRisActive, "GlobalSettlement/not-DSRisActive");
+        if (what == "CDPEngine")  CDPEngine = CDPEngineContract(data);
         else if (what == "cat")  cat = CatLike(data);
-        else if (what == "vow")  vow = VowLike(data);
+        else if (what == "debtEngine")  debtEngine = VowLike(data);
         else if (what == "pot")  pot = PotLike(data);
         else if (what == "spot") spot = Spotty(data);
-        else revert("End/file-unrecognized-param");
+        else revert("GlobalSettlement/file-unrecognized-param");
     }
-    function file(bytes32 what, uint256 data) external note auth {
-        require(live == 1, "End/not-live");
+    function file(bytes32 what, uint256 data) external emitLog onlyOwners {
+        require(DSRisActive, "GlobalSettlement/not-DSRisActive");
         if (what == "wait") wait = data;
-        else revert("End/file-unrecognized-param");
+        else revert("GlobalSettlement/file-unrecognized-param");
     }
 
     // --- Settlement ---
-    function cage() external note auth {
-        require(live == 1, "End/not-live");
-        live = 0;
+    function cage() external emitLog onlyOwners {
+        require(DSRisActive, "GlobalSettlement/not-DSRisActive");
+        DSRisActive = false;
         when = now;
-        vat.cage();
+        CDPEngine.cage();
         cat.cage();
-        vow.cage();
+        debtEngine.cage();
         spot.cage();
         pot.cage();
     }
 
-    function cage(bytes32 ilk) external note {
-        require(live == 0, "End/still-live");
-        require(tag[ilk] == 0, "End/tag-ilk-already-defined");
-        (Art[ilk],,,,) = vat.ilks(ilk);
+    function cage(bytes32 ilk) external emitLog {
+        require(!DSRisActive, "GlobalSettlement/still-DSRisActive");
+        require(tag[ilk] == 0, "GlobalSettlement/tag-ilk-already-defined");
+        (debtAmount[ilk],,,,) = CDPEngine.ilks(ilk);
         (PipLike pip,) = spot.ilks(ilk);
-        // par is a ray, pip returns a wad
+        // par is a ray, pip returns a amount
         tag[ilk] = wdiv(spot.par(), uint(pip.read()));
     }
 
-    function skip(bytes32 ilk, uint256 id) external note {
-        require(tag[ilk] != 0, "End/tag-ilk-not-defined");
+    function skip(bytes32 ilk, uint256 id) external emitLog {
+        require(tag[ilk] != 0, "GlobalSettlement/tag-ilk-not-defined");
 
         (address flipV,,) = cat.ilks(ilk);
-        Flippy flip = Flippy(flipV);
-        (, uint rate,,,) = vat.ilks(ilk);
-        (uint bid, uint lot,,,, address usr,, uint tab) = flip.bids(id);
+        Seller liquidator = Seller(flipV);
+        (, uint accumulatedRates ,,,) = CDPEngine.ilks(ilk);
+        (uint bid, uint tokensForSale,,,, address usr,, uint tab) = liquidator.bids(id);
 
-        vat.suck(address(vow), address(vow),  tab);
-        vat.suck(address(vow), address(this), bid);
-        vat.hope(address(flip));
-        flip.yank(id);
+        CDPEngine.suck(address(debtEngine), address(debtEngine),  tab);
+        CDPEngine.suck(address(debtEngine), address(this), bid);
+        CDPEngine.hope(address(liquidator));
+        liquidator.yank(id);
 
-        uint art = tab / rate;
-        Art[ilk] = add(Art[ilk], art);
-        require(int(lot) >= 0 && int(art) >= 0, "End/overflow");
-        vat.grab(ilk, usr, address(this), address(vow), int(lot), int(art));
+        uint art = tab / accumulatedRates ;
+        debtAmount[ilk] = add(debtAmount[ilk], art);
+        require(int(tokensForSale) >= 0 && int(art) >= 0, "GlobalSettlement/overflow");
+        CDPEngine.grab(ilk, usr, address(this), address(debtEngine), int(tokensForSale), int(art));
     }
 
-    function skim(bytes32 ilk, address urn) external note {
-        require(tag[ilk] != 0, "End/tag-ilk-not-defined");
-        (, uint rate,,,) = vat.ilks(ilk);
-        (uint ink, uint art) = vat.urns(ilk, urn);
+    function skim(bytes32 ilk, address urn) external emitLog {
+        require(tag[ilk] != 0, "GlobalSettlement/tag-ilk-not-defined");
+        (, uint accumulatedRates ,,,) = CDPEngine.ilks(ilk);
+        (uint ink, uint art) = CDPEngine.urns(ilk, urn);
 
-        uint owe = rmul(rmul(art, rate), tag[ilk]);
-        uint wad = min(ink, owe);
-        gap[ilk] = add(gap[ilk], sub(owe, wad));
+        uint owe = rmul(rmul(art, accumulatedRates ), tag[ilk]);
+        uint amount = min(ink, owe);
+        gap[ilk] = add(gap[ilk], sub(owe, amount));
 
-        require(wad <= 2**255 && art <= 2**255, "End/overflow");
-        vat.grab(ilk, urn, address(this), address(vow), -int(wad), -int(art));
+        require(amount <= 2**255 && art <= 2**255, "GlobalSettlement/overflow");
+        CDPEngine.grab(ilk, urn, address(this), address(debtEngine), -int(amount), -int(art));
     }
 
-    function free(bytes32 ilk) external note {
-        require(live == 0, "End/still-live");
-        (uint ink, uint art) = vat.urns(ilk, msg.sender);
-        require(art == 0, "End/art-not-zero");
-        require(ink <= 2**255, "End/overflow");
-        vat.grab(ilk, msg.sender, msg.sender, address(vow), -int(ink), 0);
+    function free(bytes32 ilk) external emitLog {
+        require(!DSRisActive, "GlobalSettlement/still-DSRisActive");
+        (uint ink, uint art) = CDPEngine.urns(ilk, msg.sender);
+        require(art == 0, "GlobalSettlement/art-not-zero");
+        require(ink <= 2**255, "GlobalSettlement/overflow");
+        CDPEngine.grab(ilk, msg.sender, msg.sender, address(debtEngine), -int(ink), 0);
     }
 
-    function thaw() external note {
-        require(live == 0, "End/still-live");
-        require(debt == 0, "End/debt-not-zero");
-        require(vat.dai(address(vow)) == 0, "End/surplus-not-zero");
-        require(now >= add(when, wait), "End/wait-not-finished");
-        debt = vat.debt();
+    function thaw() external emitLog {
+        require(!DSRisActive, "GlobalSettlement/still-DSRisActive");
+        require(debt == 0, "GlobalSettlement/debt-not-zero");
+        require(CDPEngine.dai(address(debtEngine)) == 0, "GlobalSettlement/surplus-not-zero");
+        require(now >= add(when, wait), "GlobalSettlement/wait-not-finished");
+        debt = CDPEngine.debt();
     }
-    function flow(bytes32 ilk) external note {
-        require(debt != 0, "End/debt-zero");
-        require(fix[ilk] == 0, "End/fix-ilk-already-defined");
+    function flow(bytes32 ilk) external emitLog {
+        require(debt != 0, "GlobalSettlement/debt-zero");
+        require(fix[ilk] == 0, "GlobalSettlement/fix-ilk-already-defined");
 
-        (, uint rate,,,) = vat.ilks(ilk);
-        uint256 wad = rmul(rmul(Art[ilk], rate), tag[ilk]);
-        fix[ilk] = rdiv(mul(sub(wad, gap[ilk]), RAY), debt);
+        (, uint accumulatedRates ,,,) = CDPEngine.ilks(ilk);
+        uint256 amount = rmul(rmul(debtAmount[ilk], accumulatedRates ), tag[ilk]);
+        fix[ilk] = rdiv(mul(sub(amount, gap[ilk]), RAY), debt);
     }
 
-    function pack(uint256 wad) external note {
-        require(debt != 0, "End/debt-zero");
-        vat.move(msg.sender, address(vow), mul(wad, RAY));
-        bag[msg.sender] = add(bag[msg.sender], wad);
+    function pack(uint256 amount) external emitLog {
+        require(debt != 0, "GlobalSettlement/debt-zero");
+        CDPEngine.move(msg.sender, address(debtEngine), mul(amount, RAY));
+        bag[msg.sender] = add(bag[msg.sender], amount);
     }
-    function cash(bytes32 ilk, uint wad) external note {
-        require(fix[ilk] != 0, "End/fix-ilk-not-defined");
-        vat.flux(ilk, address(this), msg.sender, rmul(wad, fix[ilk]));
-        out[ilk][msg.sender] = add(out[ilk][msg.sender], wad);
-        require(out[ilk][msg.sender] <= bag[msg.sender], "End/insufficient-bag-balance");
+    function cash(bytes32 ilk, uint amount) external emitLog {
+        require(fix[ilk] != 0, "GlobalSettlement/fix-ilk-not-defined");
+        CDPEngine.flux(ilk, address(this), msg.sender, rmul(amount, fix[ilk]));
+        out[ilk][msg.sender] = add(out[ilk][msg.sender], amount);
+        require(out[ilk][msg.sender] <= bag[msg.sender], "GlobalSettlement/insufficient-bag-balance");
     }
 }

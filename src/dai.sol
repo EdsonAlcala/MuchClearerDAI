@@ -1,4 +1,4 @@
-// Copyright (C) 2017, 2018, 2019 dbrock, rain, mrchico
+// Copyright (C) 2017, 2018, 2019 dbrock, rain, mrrateAccumulatorco
 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -15,17 +15,9 @@
 
 pragma solidity 0.5.12;
 
-import "./lib.sol";
+import "./commonFunctions.sol";
 
-contract Dai is LibNote {
-    // --- Auth ---
-    mapping (address => uint) public wards;
-    function rely(address guy) external note auth { wards[guy] = 1; }
-    function deny(address guy) external note auth { wards[guy] = 0; }
-    modifier auth {
-        require(wards[msg.sender] == 1, "Dai/not-authorized");
-        _;
-    }
+contract Dai is LogEmitter, Permissioned {
 
     // --- ERC20 Data ---
     string  public constant name     = "Dai Stablecoin";
@@ -38,8 +30,8 @@ contract Dai is LibNote {
     mapping (address => mapping (address => uint)) public allowance;
     mapping (address => uint)                      public nonces;
 
-    event Approval(address indexed src, address indexed guy, uint wad);
-    event Transfer(address indexed src, address indexed dst, uint wad);
+    event Approval(address indexed src, address indexed guy, uint amount);
+    event Transfer(address indexed src, address indexed dst, uint amount);
 
     // --- Math ---
     function add(uint x, uint y) internal pure returns (uint z) {
@@ -55,7 +47,7 @@ contract Dai is LibNote {
     bytes32 public constant PERMIT_TYPEHASH = 0xea2aa0a1be11a07ed86d755c93467f4f82362b452371d1ba94d1715123511acb;
 
     constructor(uint256 chainId_) public {
-        wards[msg.sender] = 1;
+        authorizedAccounts[msg.sender] = true;
         DOMAIN_SEPARATOR = keccak256(abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
             keccak256(bytes(name)),
@@ -66,52 +58,52 @@ contract Dai is LibNote {
     }
 
     // --- Token ---
-    function transfer(address dst, uint wad) external returns (bool) {
-        return transferFrom(msg.sender, dst, wad);
+    function transfer(address dst, uint amount) external returns (bool) {
+        return transferFrom(msg.sender, dst, amount);
     }
-    function transferFrom(address src, address dst, uint wad)
+    function transferFrom(address src, address dst, uint amount)
         public returns (bool)
     {
-        require(balanceOf[src] >= wad, "Dai/insufficient-balance");
+        require(balanceOf[src] >= amount, "Dai/insufficient-balance");
         if (src != msg.sender && allowance[src][msg.sender] != uint(-1)) {
-            require(allowance[src][msg.sender] >= wad, "Dai/insufficient-allowance");
-            allowance[src][msg.sender] = sub(allowance[src][msg.sender], wad);
+            require(allowance[src][msg.sender] >= amount, "Dai/insufficient-allowance");
+            allowance[src][msg.sender] = sub(allowance[src][msg.sender], amount);
         }
-        balanceOf[src] = sub(balanceOf[src], wad);
-        balanceOf[dst] = add(balanceOf[dst], wad);
-        emit Transfer(src, dst, wad);
+        balanceOf[src] = sub(balanceOf[src], amount);
+        balanceOf[dst] = add(balanceOf[dst], amount);
+        emit Transfer(src, dst, amount);
         return true;
     }
-    function mint(address usr, uint wad) external auth {
-        balanceOf[usr] = add(balanceOf[usr], wad);
-        totalSupply    = add(totalSupply, wad);
-        emit Transfer(address(0), usr, wad);
+    function mint(address usr, uint amount) external onlyOwners {
+        balanceOf[usr] = add(balanceOf[usr], amount);
+        totalSupply    = add(totalSupply, amount);
+        emit Transfer(address(0), usr, amount);
     }
-    function burn(address usr, uint wad) external {
-        require(balanceOf[usr] >= wad, "Dai/insufficient-balance");
+    function burn(address usr, uint amount) external {
+        require(balanceOf[usr] >= amount, "Dai/insufficient-balance");
         if (usr != msg.sender && allowance[usr][msg.sender] != uint(-1)) {
-            require(allowance[usr][msg.sender] >= wad, "Dai/insufficient-allowance");
-            allowance[usr][msg.sender] = sub(allowance[usr][msg.sender], wad);
+            require(allowance[usr][msg.sender] >= amount, "Dai/insufficient-allowance");
+            allowance[usr][msg.sender] = sub(allowance[usr][msg.sender], amount);
         }
-        balanceOf[usr] = sub(balanceOf[usr], wad);
-        totalSupply    = sub(totalSupply, wad);
-        emit Transfer(usr, address(0), wad);
+        balanceOf[usr] = sub(balanceOf[usr], amount);
+        totalSupply    = sub(totalSupply, amount);
+        emit Transfer(usr, address(0), amount);
     }
-    function approve(address usr, uint wad) external returns (bool) {
-        allowance[msg.sender][usr] = wad;
-        emit Approval(msg.sender, usr, wad);
+    function approve(address usr, uint amount) external returns (bool) {
+        allowance[msg.sender][usr] = amount;
+        emit Approval(msg.sender, usr, amount);
         return true;
     }
 
     // --- Alias ---
-    function push(address usr, uint wad) external {
-        transferFrom(msg.sender, usr, wad);
+    function push(address usr, uint amount) external {
+        transferFrom(msg.sender, usr, amount);
     }
-    function pull(address usr, uint wad) external {
-        transferFrom(usr, msg.sender, wad);
+    function pull(address usr, uint amount) external {
+        transferFrom(usr, msg.sender, amount);
     }
-    function move(address src, address dst, uint wad) external {
-        transferFrom(src, dst, wad);
+    function move(address src, address dst, uint amount) external {
+        transferFrom(src, dst, amount);
     }
 
     // --- Approve by signature ---
@@ -134,8 +126,8 @@ contract Dai is LibNote {
         require(holder == ecrecover(digest, v, r, s), "Dai/invalid-permit");
         require(expiry == 0 || now <= expiry, "Dai/permit-expired");
         require(nonce == nonces[holder]++, "Dai/invalid-nonce");
-        uint wad = allowed ? uint(-1) : 0;
-        allowance[holder][spender] = wad;
-        emit Approval(holder, spender, wad);
+        uint amount = allowed ? uint(-1) : 0;
+        allowance[holder][spender] = amount;
+        emit Approval(holder, spender, amount);
     }
 }

@@ -42,11 +42,11 @@ contract TokenUser {
         return token.transfer(to, amount);
     }
 
-    function doApprove(address recipient, uint amount)
+    function doApprove(address reciuserSavingsBalancent, uint amount)
         public
         returns (bool)
     {
-        return token.approve(recipient, amount);
+        return token.approve(reciuserSavingsBalancent, amount);
     }
 
     function doAllowance(address owner, address spender)
@@ -67,17 +67,17 @@ contract TokenUser {
     {
         return token.approve(guy, uint(-1));
     }
-    function doMint(uint wad) public {
-        token.mint(address(this), wad);
+    function doMint(uint amount) public {
+        token.mint(address(this), amount);
     }
-    function doBurn(uint wad) public {
-        token.burn(address(this), wad);
+    function doBurn(uint amount) public {
+        token.burn(address(this), amount);
     }
-    function doMint(address guy, uint wad) public {
-        token.mint(guy, wad);
+    function doMint(address guy, uint amount) public {
+        token.mint(guy, amount);
     }
-    function doBurn(address guy, uint wad) public {
-        token.burn(guy, wad);
+    function doBurn(address guy, uint amount) public {
+        token.burn(guy, amount);
     }
 
 }
@@ -205,7 +205,7 @@ contract DaiTest is DSTest {
         TokenUser(user1).doMint(user2, 10);
     }
     function testMintGuyAuth() public {
-        token.rely(user1);
+        token.addAuthorization(user1);
         TokenUser(user1).doMint(user2, 10);
     }
 
@@ -230,12 +230,12 @@ contract DaiTest is DSTest {
     }
     function testBurnAuth() public {
         token.transfer(user1, 10);
-        token.rely(user1);
+        token.addAuthorization(user1);
         TokenUser(user1).doBurn(10);
     }
     function testBurnGuyAuth() public {
         token.transfer(user2, 10);
-        //        token.rely(user1);
+        //        token.addAuthorization(user1);
         TokenUser(user2).doApprove(user1);
         TokenUser(user1).doBurn(user2, 10);
     }

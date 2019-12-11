@@ -1,6 +1,6 @@
 pragma solidity 0.5.12;
 
-import "./lib.sol";
+import "./commonFunctions.sol";
 
 contract VatLike {
     function ilks(bytes32) external returns (
@@ -10,31 +10,31 @@ contract VatLike {
     function fold(bytes32,address,int) external;
 }
 
-contract Jug is LibNote {
+contract Jug is LogEmitter {
     // --- Auth ---
-    mapping (address => uint) public wards;
-    function rely(address usr) external note auth { wards[usr] = 1; }
-    function deny(address usr) external note auth { wards[usr] = 0; }
-    modifier auth {
-        require(wards[msg.sender] == 1, "Jug/not-authorized");
+    mapping (address => uint) public authorizedAccounts;
+    function addAuthorization(address usr) external emitLog onlyOwners { authorizedAccounts[usr] = 1; }
+    function removeAuthorization(address usr) external emitLog onlyOwners { authorizedAccounts[usr] = 0; }
+    modifier onlyOwners {
+        require(authorizedAccounts[msg.sender] == 1, "Jug/not-onlyOwnersorized");
         _;
     }
 
     // --- Data ---
     struct Ilk {
         uint256 duty;
-        uint256  rho;
+        uint256  timeOfLastCollectionRate;
     }
 
     mapping (bytes32 => Ilk) public ilks;
-    VatLike                  public vat;
-    address                  public vow;
+    VatLike                  public CDPEngine;
+    address                  public debtEngine;
     uint256                  public base;
 
     // --- Init ---
-    constructor(address vat_) public {
-        wards[msg.sender] = 1;
-        vat = VatLike(vat_);
+    constructor(address CDPEngine_) public {
+        authorizedAccounts[msg.sender] = 1;
+        CDPEngine = VatLike(CDPEngine_);
     }
 
     // --- Math ---
@@ -77,32 +77,32 @@ contract Jug is LibNote {
     }
 
     // --- Administration ---
-    function init(bytes32 ilk) external note auth {
+    function init(bytes32 ilk) external emitLog onlyOwners {
         Ilk storage i = ilks[ilk];
         require(i.duty == 0, "Jug/ilk-already-init");
         i.duty = ONE;
-        i.rho  = now;
+        i.timeOfLastCollectionRate  = now;
     }
-    function file(bytes32 ilk, bytes32 what, uint data) external note auth {
-        require(now == ilks[ilk].rho, "Jug/rho-not-updated");
+    function file(bytes32 ilk, bytes32 what, uint data) external emitLog onlyOwners {
+        require(now == ilks[ilk].timeOfLastCollectionRate, "Jug/timeOfLastCollectionRate-not-updated");
         if (what == "duty") ilks[ilk].duty = data;
         else revert("Jug/file-unrecognized-param");
     }
-    function file(bytes32 what, uint data) external note auth {
+    function file(bytes32 what, uint data) external emitLog onlyOwners {
         if (what == "base") base = data;
         else revert("Jug/file-unrecognized-param");
     }
-    function file(bytes32 what, address data) external note auth {
-        if (what == "vow") vow = data;
+    function file(bytes32 what, address data) external emitLog onlyOwners {
+        if (what == "debtEngine") debtEngine = data;
         else revert("Jug/file-unrecognized-param");
     }
 
     // --- Stability Fee Collection ---
-    function drip(bytes32 ilk) external note returns (uint rate) {
-        require(now >= ilks[ilk].rho, "Jug/invalid-now");
-        (, uint prev) = vat.ilks(ilk);
-        rate = rmul(rpow(add(base, ilks[ilk].duty), now - ilks[ilk].rho, ONE), prev);
-        vat.fold(ilk, vow, diff(rate, prev));
-        ilks[ilk].rho = now;
+    function collectRate(bytes32 ilk) external emitLog returns (uint rate) {
+        require(now >= ilks[ilk].timeOfLastCollectionRate, "Jug/invalid-now");
+        (, uint prev) = CDPEngine.ilks(ilk);
+        rate = rmul(rpow(add(base, ilks[ilk].duty), now - ilks[ilk].timeOfLastCollectionRate, ONE), prev);
+        CDPEngine.fold(ilk, debtEngine, diff(rate, prev));
+        ilks[ilk].timeOfLastCollectionRate = now;
     }
 }

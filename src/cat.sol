@@ -17,22 +17,22 @@
 
 pragma solidity 0.5.12;
 
-import "./lib.sol";
+import "./commonFunctions.sol";
 
 contract Kicker {
-    function kick(address urn, address gal, uint tab, uint lot, uint bid)
+    function kick(address urn, address daiIncomeReceiver, uint tab, uint tokensForSale, uint bid)
         public returns (uint);
 }
 
-contract VatLike {
+contract CDPEngineContract {
     function ilks(bytes32) external view returns (
-        uint256 Art,   // wad
-        uint256 rate,  // ray
+        uint256 debtAmount,   // amount
+        uint256 accumulatedRates ,  // ray
         uint256 spot   // ray
     );
     function urns(bytes32,address) external view returns (
-        uint256 ink,   // wad
-        uint256 art    // wad
+        uint256 ink,   // amount
+        uint256 art    // amount
     );
     function grab(bytes32,address,address,address,int,int) external;
     function hope(address) external;
@@ -43,45 +43,37 @@ contract VowLike {
     function fess(uint) external;
 }
 
-contract Cat is LibNote {
-    // --- Auth ---
-    mapping (address => uint) public wards;
-    function rely(address usr) external note auth { wards[usr] = 1; }
-    function deny(address usr) external note auth { wards[usr] = 0; }
-    modifier auth {
-        require(wards[msg.sender] == 1, "Cat/not-authorized");
-        _;
-    }
+contract Cat is LogEmitter, Permissioned {
 
     // --- Data ---
     struct Ilk {
-        address flip;  // Liquidator
-        uint256 chop;  // Liquidation Penalty   [ray]
-        uint256 lump;  // Liquidation Quantity  [wad]
+        address liquidator;  // Liquidator
+        uint256 liquidatorPenalty;  // Liquidation Penalty   [ray]
+        uint256 liquidatorAmount;  // Liquidation Quantity  [amount]
     }
 
     mapping (bytes32 => Ilk) public ilks;
 
-    uint256 public live;
-    VatLike public vat;
-    VowLike public vow;
+    bool public DSRisActive;
+    CDPEngineContract public CDPEngine;
+    VowLike public debtEngine;
 
     // --- Events ---
-    event Bite(
+    event CDPLiquidationEvent(
       bytes32 indexed ilk,
       address indexed urn,
       uint256 ink,
       uint256 art,
       uint256 tab,
-      address flip,
+      address liquidator,
       uint256 id
     );
 
     // --- Init ---
-    constructor(address vat_) public {
-        wards[msg.sender] = 1;
-        vat = VatLike(vat_);
-        live = 1;
+    constructor(address CDPEngine_) public {
+        authorizedAccounts[msg.sender] = true;
+        CDPEngine = CDPEngineContract(CDPEngine_);
+        DSRisActive = true;
     }
 
     // --- Math ---
@@ -98,50 +90,50 @@ contract Cat is LibNote {
     }
 
     // --- Administration ---
-    function file(bytes32 what, address data) external note auth {
-        if (what == "vow") vow = VowLike(data);
+    function file(bytes32 what, address data) external emitLog onlyOwners {
+        if (what == "debtEngine") debtEngine = VowLike(data);
         else revert("Cat/file-unrecognized-param");
     }
-    function file(bytes32 ilk, bytes32 what, uint data) external note auth {
-        if (what == "chop") ilks[ilk].chop = data;
-        else if (what == "lump") ilks[ilk].lump = data;
+    function file(bytes32 ilk, bytes32 what, uint data) external emitLog onlyOwners {
+        if (what == "liquidatorPenalty") ilks[ilk].liquidatorPenalty = data;
+        else if (what == "liquidatorAmount") ilks[ilk].liquidatorAmount = data;
         else revert("Cat/file-unrecognized-param");
     }
-    function file(bytes32 ilk, bytes32 what, address flip) external note auth {
-        if (what == "flip") {
-            vat.nope(ilks[ilk].flip);
-            ilks[ilk].flip = flip;
-            vat.hope(flip);
+    function file(bytes32 ilk, bytes32 what, address liquidator) external emitLog onlyOwners {
+        if (what == "liquidator") {
+            CDPEngine.nope(ilks[ilk].liquidator);
+            ilks[ilk].liquidator = liquidator;
+            CDPEngine.hope(liquidator);
         }
         else revert("Cat/file-unrecognized-param");
     }
 
     // --- CDP Liquidation ---
-    function bite(bytes32 ilk, address urn) external returns (uint id) {
-        (, uint rate, uint spot) = vat.ilks(ilk);
-        (uint ink, uint art) = vat.urns(ilk, urn);
+    function CDPLiquidation(bytes32 ilk, address urn) external returns (uint id) {
+        (, uint accumulatedRates , uint spot) = CDPEngine.ilks(ilk);
+        (uint ink, uint art) = CDPEngine.urns(ilk, urn);
 
-        require(live == 1, "Cat/not-live");
-        require(spot > 0 && mul(ink, spot) < mul(art, rate), "Cat/not-unsafe");
+        require(DSRisActive, "Cat/not-DSRisActive");
+        require(spot > 0 && mul(ink, spot) < mul(art, accumulatedRates ), "Cat/not-unsafe");
 
-        uint lot = min(ink, ilks[ilk].lump);
-        art      = min(art, mul(lot, art) / ink);
+        uint tokensForSale = min(ink, ilks[ilk].liquidatorAmount);
+        art      = min(art, mul(tokensForSale, art) / ink);
 
-        require(lot <= 2**255 && art <= 2**255, "Cat/overflow");
-        vat.grab(ilk, urn, address(this), address(vow), -int(lot), -int(art));
+        require(tokensForSale <= 2**255 && art <= 2**255, "Cat/overflow");
+        CDPEngine.grab(ilk, urn, address(this), address(debtEngine), -int(tokensForSale), -int(art));
 
-        vow.fess(mul(art, rate));
-        id = Kicker(ilks[ilk].flip).kick({ urn: urn
-                                         , gal: address(vow)
-                                         , tab: rmul(mul(art, rate), ilks[ilk].chop)
-                                         , lot: lot
+        debtEngine.fess(mul(art, accumulatedRates ));
+        id = Kicker(ilks[ilk].liquidator).kick({ urn: urn
+                                         , daiIncomeReceiver: address(debtEngine)
+                                         , tab: rmul(mul(art, accumulatedRates ), ilks[ilk].liquidatorPenalty)
+                                         , tokensForSale: tokensForSale
                                          , bid: 0
                                          });
 
-        emit Bite(ilk, urn, lot, art, mul(art, rate), ilks[ilk].flip, id);
+        emit CDPLiquidationEvent(ilk, urn, tokensForSale, art, mul(art, accumulatedRates ), ilks[ilk].liquidator, id);
     }
 
-    function cage() external note auth {
-        live = 0;
+    function cage() external emitLog onlyOwners {
+        DSRisActive = false;
     }
 }

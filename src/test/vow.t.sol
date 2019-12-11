@@ -3,9 +3,9 @@ pragma solidity 0.5.12;
 import "ds-test/test.sol";
 
 import {Flopper as Flop} from './flop.t.sol';
-import {Flapper as Flap} from './flap.t.sol';
-import {TestVat as  Vat} from './vat.t.sol';
-import {Vow}     from '../vow.sol';
+import {CollateralBuyerContract as purchaseCollateralContract} from './buyCollateral.t.sol';
+import {TestVat as  CDPEngineInstance} from './CDPEngine.t.sol';
+import {Vow}     from '../debtEngine.sol';
 
 contract Hevm {
     function warp(uint256) public;
@@ -21,40 +21,40 @@ contract Gem {
 contract VowTest is DSTest {
     Hevm hevm;
 
-    Vat  vat;
-    Vow  vow;
+    CDPEngineInstance  CDPEngine;
+    Vow  debtEngine;
     Flop flop;
-    Flap flap;
+    purchaseCollateralContract buyCollateral;
     Gem  gov;
 
     function setUp() public {
         hevm = Hevm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
         hevm.warp(604411200);
 
-        vat = new Vat();
+        CDPEngine = new CDPEngineInstance();
 
         gov  = new Gem();
-        flop = new Flop(address(vat), address(gov));
-        flap = new Flap(address(vat), address(gov));
+        flop = new Flop(address(CDPEngine), address(gov));
+        buyCollateral = new purchaseCollateralContract(address(CDPEngine), address(gov));
 
-        vow = new Vow(address(vat), address(flap), address(flop));
-        flap.rely(address(vow));
-        flop.rely(address(vow));
+        debtEngine = new Vow(address(CDPEngine), address(buyCollateral), address(flop));
+        buyCollateral.addAuthorization(address(debtEngine));
+        flop.addAuthorization(address(debtEngine));
 
-        vow.file("bump", rad(100 ether));
-        vow.file("sump", rad(100 ether));
-        vow.file("dump", 200 ether);
+        debtEngine.file("bump", rad(100 ether));
+        debtEngine.file("sump", rad(100 ether));
+        debtEngine.file("dump", 200 ether);
 
-        vat.hope(address(flop));
+        CDPEngine.hope(address(flop));
     }
 
     function try_flog(uint era) internal returns (bool ok) {
         string memory sig = "flog(uint256)";
-        (ok,) = address(vow).call(abi.encodeWithSignature(sig, era));
+        (ok,) = address(debtEngine).call(abi.encodeWithSignature(sig, era));
     }
-    function try_dent(uint id, uint lot, uint bid) internal returns (bool ok) {
+    function try_dent(uint id, uint tokensForSale, uint bid) internal returns (bool ok) {
         string memory sig = "dent(uint256,uint256,uint256)";
-        (ok,) = address(flop).call(abi.encodeWithSignature(sig, id, lot, bid));
+        (ok,) = address(flop).call(abi.encodeWithSignature(sig, id, tokensForSale, bid));
     }
     function try_call(address addr, bytes calldata data) external returns (bool) {
         bytes memory _data = data;
@@ -67,10 +67,10 @@ contract VowTest is DSTest {
         }
     }
     function can_flap() public returns (bool) {
-        string memory sig = "flap()";
+        string memory sig = "buyCollateral()";
         bytes memory data = abi.encodeWithSignature(sig);
 
-        bytes memory can_call = abi.encodeWithSignature("try_call(address,bytes)", vow, data);
+        bytes memory can_call = abi.encodeWithSignature("try_call(address,bytes)", debtEngine, data);
         (bool ok, bytes memory success) = address(this).call(can_call);
 
         ok = abi.decode(success, (bool));
@@ -80,7 +80,7 @@ contract VowTest is DSTest {
         string memory sig = "flop()";
         bytes memory data = abi.encodeWithSignature(sig);
 
-        bytes memory can_call = abi.encodeWithSignature("try_call(address,bytes)", vow, data);
+        bytes memory can_call = abi.encodeWithSignature("try_call(address,bytes)", debtEngine, data);
         (bool ok, bytes memory success) = address(this).call(can_call);
 
         ok = abi.decode(success, (bool));
@@ -88,50 +88,50 @@ contract VowTest is DSTest {
     }
 
     uint constant ONE = 10 ** 27;
-    function rad(uint wad) internal pure returns (uint) {
-        return wad * ONE;
+    function rad(uint amount) internal pure returns (uint) {
+        return amount * ONE;
     }
 
-    function suck(address who, uint wad) internal {
-        vow.fess(rad(wad));
-        vat.init('');
-        vat.suck(address(vow), who, rad(wad));
+    function suck(address who, uint amount) internal {
+        debtEngine.fess(rad(amount));
+        CDPEngine.init('');
+        CDPEngine.suck(address(debtEngine), who, rad(amount));
     }
-    function flog(uint wad) internal {
-        suck(address(0), wad);  // suck dai into the zero address
-        vow.flog(now);
+    function flog(uint amount) internal {
+        suck(address(0), amount);  // suck dai into the zero address
+        debtEngine.flog(now);
     }
-    function heal(uint wad) internal {
-        vow.heal(rad(wad));
+    function heal(uint amount) internal {
+        debtEngine.heal(rad(amount));
     }
 
     function test_change_flap_flop() public {
-        Flap newFlap = new Flap(address(vat), address(gov));
-        Flop newFlop = new Flop(address(vat), address(gov));
+        purchaseCollateralContract newFlap = new purchaseCollateralContract(address(CDPEngine), address(gov));
+        Flop newFlop = new Flop(address(CDPEngine), address(gov));
 
-        newFlap.rely(address(vow));
-        newFlop.rely(address(vow));
+        newFlap.addAuthorization(address(debtEngine));
+        newFlop.addAuthorization(address(debtEngine));
 
-        assertEq(vat.can(address(vow), address(flap)), 1);
-        assertEq(vat.can(address(vow), address(newFlap)), 0);
+        assertEq(CDPEngine.can(address(debtEngine), address(buyCollateral)), 1);
+        assertEq(CDPEngine.can(address(debtEngine), address(newFlap)), 0);
 
-        vow.file('flapper', address(newFlap));
-        vow.file('flopper', address(newFlop));
+        debtEngine.file('flapper', address(newFlap));
+        debtEngine.file('flopper', address(newFlop));
 
-        assertEq(address(vow.flapper()), address(newFlap));
-        assertEq(address(vow.flopper()), address(newFlop));
+        assertEq(address(debtEngine.flapper()), address(newFlap));
+        assertEq(address(debtEngine.flopper()), address(newFlop));
 
-        assertEq(vat.can(address(vow), address(flap)), 0);
-        assertEq(vat.can(address(vow), address(newFlap)), 1);
+        assertEq(CDPEngine.can(address(debtEngine), address(buyCollateral)), 0);
+        assertEq(CDPEngine.can(address(debtEngine), address(newFlap)), 1);
     }
 
     function test_flog_wait() public {
-        assertEq(vow.wait(), 0);
-        vow.file('wait', uint(100 seconds));
-        assertEq(vow.wait(), 100 seconds);
+        assertEq(debtEngine.wait(), 0);
+        debtEngine.file('wait', uint(100 seconds));
+        assertEq(debtEngine.wait(), 100 seconds);
 
         uint tic = now;
-        vow.fess(100 ether);
+        debtEngine.fess(100 ether);
         assertTrue(!try_flog(tic) );
         hevm.warp(now + tic + 100 seconds);
         assertTrue( try_flog(tic) );
@@ -140,14 +140,14 @@ contract VowTest is DSTest {
     function test_no_reflop() public {
         flog(100 ether);
         assertTrue( can_flop() );
-        vow.flop();
+        debtEngine.flop();
         assertTrue(!can_flop() );
     }
 
     function test_no_flop_pending_joy() public {
         flog(200 ether);
 
-        vat.mint(address(vow), 100 ether);
+        CDPEngine.mint(address(debtEngine), 100 ether);
         assertTrue(!can_flop() );
 
         heal(100 ether);
@@ -155,36 +155,36 @@ contract VowTest is DSTest {
     }
 
     function test_flap() public {
-        vat.mint(address(vow), 100 ether);
+        CDPEngine.mint(address(debtEngine), 100 ether);
         assertTrue( can_flap() );
     }
 
     function test_no_flap_pending_sin() public {
-        vow.file("bump", uint256(0 ether));
+        debtEngine.file("bump", uint256(0 ether));
         flog(100 ether);
 
-        vat.mint(address(vow), 50 ether);
+        CDPEngine.mint(address(debtEngine), 50 ether);
         assertTrue(!can_flap() );
     }
     function test_no_flap_nonzero_woe() public {
-        vow.file("bump", uint256(0 ether));
+        debtEngine.file("bump", uint256(0 ether));
         flog(100 ether);
-        vat.mint(address(vow), 50 ether);
+        CDPEngine.mint(address(debtEngine), 50 ether);
         assertTrue(!can_flap() );
     }
     function test_no_flap_pending_flop() public {
         flog(100 ether);
-        vow.flop();
+        debtEngine.flop();
 
-        vat.mint(address(vow), 100 ether);
+        CDPEngine.mint(address(debtEngine), 100 ether);
 
         assertTrue(!can_flap() );
     }
     function test_no_flap_pending_heal() public {
         flog(100 ether);
-        uint id = vow.flop();
+        uint id = debtEngine.flop();
 
-        vat.mint(address(this), 100 ether);
+        CDPEngine.mint(address(this), 100 ether);
         flop.dent(id, 0 ether, rad(100 ether));
 
         assertTrue(!can_flap() );
@@ -192,8 +192,8 @@ contract VowTest is DSTest {
 
     function test_no_surplus_after_good_flop() public {
         flog(100 ether);
-        uint id = vow.flop();
-        vat.mint(address(this), 100 ether);
+        uint id = debtEngine.flop();
+        CDPEngine.mint(address(this), 100 ether);
 
         flop.dent(id, 0 ether, rad(100 ether));  // flop succeeds..
 
@@ -202,12 +202,12 @@ contract VowTest is DSTest {
 
     function test_multiple_flop_dents() public {
         flog(100 ether);
-        uint id = vow.flop();
+        uint id = debtEngine.flop();
 
-        vat.mint(address(this), 100 ether);
+        CDPEngine.mint(address(this), 100 ether);
         assertTrue(try_dent(id, 2 ether,  rad(100 ether)));
 
-        vat.mint(address(this), 100 ether);
+        CDPEngine.mint(address(this), 100 ether);
         assertTrue(try_dent(id, 1 ether,  rad(100 ether)));
     }
 }

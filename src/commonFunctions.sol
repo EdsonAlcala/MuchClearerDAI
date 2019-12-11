@@ -13,7 +13,23 @@
 
 pragma solidity 0.5.12;
 
-contract LibNote {
+contract CommonFunctions {
+    // --- Auth ---
+    mapping (address => bool) public authorizedAccounts;
+
+    function addAuthorization(address accountToAdd) external emitLog onlyOwners {
+      authorizedAccounts[accountToAdd] = true;
+    }
+
+    function removeAuthorization(address accountToRemove) external emitLog onlyOwners {
+      authorizedAccounts[accountToRemove] = false;
+    }
+
+    modifier onlyOwners {
+        require(authorizedAccounts[msg.sender] == 1, "Cat/not-onlyOwnersorized");
+        _;
+    }
+
     event LogNote(
         bytes4   indexed  sig,
         address  indexed  usr,
@@ -22,7 +38,7 @@ contract LibNote {
         bytes             data
     ) anonymous;
 
-    modifier note {
+    modifier emitLog {
         _;
         assembly {
             // log an 'anonymous' event with a constant 6 words of calldata

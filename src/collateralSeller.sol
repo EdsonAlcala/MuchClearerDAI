@@ -1,4 +1,4 @@
-/// flip.sol -- Collateral auction
+/// liquidator.sol -- Collateral auction
 
 // Copyright (C) 2018 Rain <rainbreak@riseup.net>
 //
@@ -17,75 +17,67 @@
 
 pragma solidity 0.5.12;
 
-import "./lib.sol";
+import "./commonFunctions.sol";
 
-contract VatLike {
+contract CDPEngineContract {
     function move(address,address,uint) external;
     function flux(bytes32,address,address,uint) external;
 }
 
 /*
-   This thing lets you flip some gems for a given amount of dai.
+   This thing lets you liquidator some gems for a given amount of dai.
    Once the given amount of dai is raised, gems are forgone instead.
 
- - `lot` gems for sale
+ - `tokensForSale` gems for sale
  - `tab` total dai wanted
  - `bid` dai paid
- - `gal` receives dai income
- - `usr` receives gem forgone
- - `ttl` single bid lifetime
- - `beg` minimum bid increase
+ - `daiIncomeReceiver` receives dai income
+ - `usr` receives tokenCollateral forgone
+ - `singleBidLifetime` single bid lifetime
+ - `minimumBidIncrease` minimum bid increase
  - `end` max auction duration
 */
 
-contract Flipper is LibNote {
-    // --- Auth ---
-    mapping (address => uint) public wards;
-    function rely(address usr) external note auth { wards[usr] = 1; }
-    function deny(address usr) external note auth { wards[usr] = 0; }
-    modifier auth {
-        require(wards[msg.sender] == 1, "Flipper/not-authorized");
-        _;
-    }
+contract Flipper is LogEmitter, Permissioned {
 
     // --- Data ---
     struct Bid {
         uint256 bid;
-        uint256 lot;
+        uint256 tokensForSale;
         address guy;  // high bidder
         uint48  tic;  // expiry time
         uint48  end;
         address usr;
-        address gal;
+        address daiIncomeReceiver;
         uint256 tab;
     }
 
     mapping (uint => Bid) public bids;
 
-    VatLike public   vat;
+    CDPEngineContract public   CDPEngine;
     bytes32 public   ilk;
 
     uint256 constant ONE = 1.00E18;
-    uint256 public   beg = 1.05E18;  // 5% minimum bid increase
-    uint48  public   ttl = 3 hours;  // 3 hours bid duration
+    uint256 public   minimumBidIncrease = 1.05E18;  // 5% minimum bid increase
+    uint48  public   singleBidLifetime = 3 hours;  // 3 hours bid duration
     uint48  public   tau = 2 days;   // 2 days total auction length
     uint256 public kicks = 0;
 
     // --- Events ---
     event Kick(
       uint256 id,
-      uint256 lot,
+      uint256 tokensForSale,
       uint256 bid,
       uint256 tab,
       address indexed usr,
-      address indexed gal
+      address indexed daiIncomeReceiver
     );
 
     // --- Init ---
-    constructor(address vat_, bytes32 ilk_) public {
-        vat = VatLike(vat_);
+    constructor(address CDPEngine_, bytes32 ilk_) public {
+        CDPEngine = CDPEngineContract(CDPEngine_);
         ilk = ilk_;
-        wards[msg.sender] = 1;
+        authorizedAccounts[msg.sender] = true;
     }
 
     // --- Math ---
@@ -97,82 +89,82 @@ contract Flipper is LibNote {
     }
 
     // --- Admin ---
-    function file(bytes32 what, uint data) external note auth {
-        if (what == "beg") beg = data;
-        else if (what == "ttl") ttl = uint48(data);
+    function file(bytes32 what, uint data) external emitLog onlyOwners {
+        if (what == "minimumBidIncrease") minimumBidIncrease = data;
+        else if (what == "singleBidLifetime") singleBidLifetime = uint48(data);
         else if (what == "tau") tau = uint48(data);
         else revert("Flipper/file-unrecognized-param");
     }
 
     // --- Auction ---
-    function kick(address usr, address gal, uint tab, uint lot, uint bid)
-        public auth returns (uint id)
+    function kick(address usr, address daiIncomeReceiver, uint tab, uint tokensForSale, uint bid)
+        public onlyOwners returns (uint id)
     {
         require(kicks < uint(-1), "Flipper/overflow");
         id = ++kicks;
 
         bids[id].bid = bid;
-        bids[id].lot = lot;
+        bids[id].tokensForSale = tokensForSale;
         bids[id].guy = msg.sender; // configurable??
         bids[id].end = add(uint48(now), tau);
         bids[id].usr = usr;
-        bids[id].gal = gal;
+        bids[id].daiIncomeReceiver = daiIncomeReceiver;
         bids[id].tab = tab;
 
-        vat.flux(ilk, msg.sender, address(this), lot);
+        CDPEngine.flux(ilk, msg.sender, address(this), tokensForSale);
 
-        emit Kick(id, lot, bid, tab, usr, gal);
+        emit Kick(id, tokensForSale, bid, tab, usr, daiIncomeReceiver);
     }
-    function tick(uint id) external note {
+    function tick(uint id) external emitLog {
         require(bids[id].end < now, "Flipper/not-finished");
         require(bids[id].tic == 0, "Flipper/bid-already-placed");
         bids[id].end = add(uint48(now), tau);
     }
-    function tend(uint id, uint lot, uint bid) external note {
+    function tend(uint id, uint tokensForSale, uint bid) external emitLog {
         require(bids[id].guy != address(0), "Flipper/guy-not-set");
         require(bids[id].tic > now || bids[id].tic == 0, "Flipper/already-finished-tic");
         require(bids[id].end > now, "Flipper/already-finished-end");
 
-        require(lot == bids[id].lot, "Flipper/lot-not-matching");
+        require(tokensForSale == bids[id].tokensForSale, "Flipper/tokensForSale-not-matrateAccumulatorng");
         require(bid <= bids[id].tab, "Flipper/higher-than-tab");
         require(bid >  bids[id].bid, "Flipper/bid-not-higher");
-        require(mul(bid, ONE) >= mul(beg, bids[id].bid) || bid == bids[id].tab, "Flipper/insufficient-increase");
+        require(mul(bid, ONE) >= mul(minimumBidIncrease, bids[id].bid) || bid == bids[id].tab, "Flipper/insufficient-increase");
 
-        vat.move(msg.sender, bids[id].guy, bids[id].bid);
-        vat.move(msg.sender, bids[id].gal, bid - bids[id].bid);
+        CDPEngine.move(msg.sender, bids[id].guy, bids[id].bid);
+        CDPEngine.move(msg.sender, bids[id].daiIncomeReceiver, bid - bids[id].bid);
 
         bids[id].guy = msg.sender;
         bids[id].bid = bid;
-        bids[id].tic = add(uint48(now), ttl);
+        bids[id].tic = add(uint48(now), singleBidLifetime);
     }
-    function dent(uint id, uint lot, uint bid) external note {
+    function dent(uint id, uint tokensForSale, uint bid) external emitLog {
         require(bids[id].guy != address(0), "Flipper/guy-not-set");
         require(bids[id].tic > now || bids[id].tic == 0, "Flipper/already-finished-tic");
         require(bids[id].end > now, "Flipper/already-finished-end");
 
-        require(bid == bids[id].bid, "Flipper/not-matching-bid");
+        require(bid == bids[id].bid, "Flipper/not-matrateAccumulatorng-bid");
         require(bid == bids[id].tab, "Flipper/tend-not-finished");
-        require(lot < bids[id].lot, "Flipper/lot-not-lower");
-        require(mul(beg, lot) <= mul(bids[id].lot, ONE), "Flipper/insufficient-decrease");
+        require(tokensForSale < bids[id].tokensForSale, "Flipper/tokensForSale-not-lower");
+        require(mul(minimumBidIncrease, tokensForSale) <= mul(bids[id].tokensForSale, ONE), "Flipper/insufficient-decrease");
 
-        vat.move(msg.sender, bids[id].guy, bid);
-        vat.flux(ilk, address(this), bids[id].usr, bids[id].lot - lot);
+        CDPEngine.move(msg.sender, bids[id].guy, bid);
+        CDPEngine.flux(ilk, address(this), bids[id].usr, bids[id].tokensForSale - tokensForSale);
 
         bids[id].guy = msg.sender;
-        bids[id].lot = lot;
-        bids[id].tic = add(uint48(now), ttl);
+        bids[id].tokensForSale = tokensForSale;
+        bids[id].tic = add(uint48(now), singleBidLifetime);
     }
-    function deal(uint id) external note {
+    function deal(uint id) external emitLog {
         require(bids[id].tic != 0 && (bids[id].tic < now || bids[id].end < now), "Flipper/not-finished");
-        vat.flux(ilk, address(this), bids[id].guy, bids[id].lot);
+        CDPEngine.flux(ilk, address(this), bids[id].guy, bids[id].tokensForSale);
         delete bids[id];
     }
 
-    function yank(uint id) external note auth {
+    function yank(uint id) external emitLog onlyOwners {
         require(bids[id].guy != address(0), "Flipper/guy-not-set");
         require(bids[id].bid < bids[id].tab, "Flipper/already-dent-phase");
-        vat.flux(ilk, address(this), msg.sender, bids[id].lot);
-        vat.move(msg.sender, bids[id].guy, bids[id].bid);
+        CDPEngine.flux(ilk, address(this), msg.sender, bids[id].tokensForSale);
+        CDPEngine.move(msg.sender, bids[id].guy, bids[id].bid);
         delete bids[id];
     }
 }
