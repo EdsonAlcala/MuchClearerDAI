@@ -1,3 +1,23 @@
+# Much Clearer DAI
+
+_'First the spot files the vat, which grabs the cat. The cat calls fess on the vow, which can kick the flap to move the vat. Couldn't be simpler.' - Nick Johnson_
+
+_Heartbleed (OpenSSL attack) existed for 10 years before it was found. Maker’s source code is notoriously hard to follow and a big complaint by a large portion of the Ethereum dev community. I have personally told them previously that I didn’t audit Maker’s contracts because it was too hard to read their code. - Micah Zoltu_
+
+We believe in building a new open, more transparent financial system for the world. But "open" is more than just "open source", it also requires the language to be the most acessible possible, that allows the largest possible amount of eyes to look into it. Maker's DAI is now the most popular open stablecoin and the basis of most of the new DEFI movement being built in ethereum — yet, most of the code is inscrutable, choosing to rename common concepts (a token is called a _gem_, the auction of auctioning off gems is called _flap_) and to focus on short, 3-4 letter variable names (_wad_, _guy_, _vat_, _kick_). The code has almost no comments—ironically, most exceptions are to explain their own vocabulary.
+
+This is not meant to be a fork of DAI, but a repository that copies the same current functionality of the main repo, but tries to rename them to more acessible terms. We avoid creating our own terms, but rather often use the names that Maker calls them, but to use them as the main variable names. Currently it's a work mostly of doing a lot of Find & Replace on the project overall. We expect a lot of functionality and tests to be broken, so don't expect to be able to run this out of the box. This is a volunteer work in progress.
+
+### Changed filenames:
+
+- ~pot.sol~ -> daiSavingsRate.sol
+- ~end.sol~ -> globalSettlement.sol
+- ~lib.sol~ -> commonFunctions.sol
+- ~join.sol~ -> adapters.sol
+- ~flip.sol~ -> collateralSeller.sol
+- ~flop.sol~ -> collateralBuyer.sol
+- ~vat.sol~ -> CDPEngine.sol
+
 # Multi Collateral Dai
 
 This repository contains the core smart contract code for Multi
@@ -12,14 +32,16 @@ whitepaper.
 ## Design Considerations
 
 - Token agnostic
+
   - system doesn't care about the implementation of external tokens
   - can operate entirely independently of other systems, provided an authority assigns
     initial collateral to users in the system and provides price data.
 
 - Verifiable
+
   - designed from the bottom up to be amenable to formal verification
-  - the core cdp and balance database makes *no* external calls and
-    contains *no* precision loss (i.e. no division)
+  - the core cdp and balance database makes _no_ external calls and
+    contains _no_ precision loss (i.e. no division)
 
 - Modular
   - multi contract core system is made to be very adaptable to changing
@@ -27,7 +49,6 @@ whitepaper.
   - allows for implementations of e.g. auctions, liquidation, CDP risk
     conditions, to be altered on a live system.
   - allows for the addition of novel collateral types (e.g. whitelisting)
-
 
 ## Collateral, Adapters and Wrappers
 
@@ -42,7 +63,7 @@ reasons for wrapping. For example, the WETH token is an ERC20 wrapper
 around native ether.
 
 In MCD, we abstract all of these different token behaviours away behind
-*Adapters*.
+_Adapters_.
 
 Adapters manipulate a single core system function: `slip`, which
 modifies user collateral balances.
@@ -55,8 +76,7 @@ token that it represents.
 
 There can be a multitude of adapters for each collateral type, for
 different requirements. For example, ETH collateral could have an
-adapter for native ether and *also* for WETH.
-
+adapter for native ether and _also_ for WETH.
 
 ## The Dai Token
 
@@ -66,8 +86,8 @@ core (`vat.dai`, sometimes referred to as `D`).
 Given this, there are a number of ways to implement the Dai that is used
 outside of the system, with different trade offs.
 
-*Fundamentally, "Dai" is any token that is directly fungible with the
-core.*
+_Fundamentally, "Dai" is any token that is directly fungible with the
+core._
 
 In the Kovan deployment, "Dai" is represented by an ERC20 DSToken.
 After interacting with CDPs and auctions, users must `exit` from the
@@ -83,7 +103,6 @@ tokens. Users of the core could `exit` into a Plasma sidechain, an
 Ethereum shard, or a different blockchain entirely via e.g. the Cosmos
 Hub.
 
-
 ## Price Feeds
 
 Price feeds are a crucial part of the Dai system. The code here assumes
@@ -93,15 +112,13 @@ pushed to the contracts.
 Specifically, the price that is required is the highest acceptable
 quantity of CDP Dai debt per unit of collateral.
 
-
 ## Liquidation and Auctions
 
 An important difference between SCD and MCD is the switch from fixed
 price sell offs to auctions as the means of liquidating collateral.
 
 The auctions implemented here are simple and expect liquidations to
-occur in *fixed size lots* (say 10,000 ETH).
-
+occur in _fixed size lots_ (say 10,000 ETH).
 
 ## Settlement
 
@@ -119,7 +136,6 @@ MKR dilution is delayed by a configurable period (e.g 1 week).
 
 Similarly, System Surplus is handled by an auction (`flap`), which sells
 off Dai surplus in return for the highest bidder in MKR.
-
 
 ## Authentication
 

@@ -3,7 +3,7 @@ pragma solidity 0.5.12;
 import {DSTest}  from "ds-test/test.sol";
 import {DSToken} from "ds-token/token.sol";
 import "../flop.sol";
-import "../vat.sol";
+import "../CDPEngine.sol";
 
 
 contract Hevm {
@@ -14,20 +14,20 @@ contract Guy {
     Flopper flop;
     constructor(Flopper flop_) public {
         flop = flop_;
-        Vat(address(flop.vat())).hope(address(flop));
-        DSToken(address(flop.gem())).approve(address(flop));
+        CDPEngineInstance(address(flop.CDPEngine())).hope(address(flop));
+        DSToken(address(flop.tokenCollateral())).approve(address(flop));
     }
-    function dent(uint id, uint lot, uint bid) public {
-        flop.dent(id, lot, bid);
+    function dent(uint id, uint tokensForSale, uint bid) public {
+        flop.dent(id, tokensForSale, bid);
     }
     function deal(uint id) public {
         flop.deal(id);
     }
-    function try_dent(uint id, uint lot, uint bid)
+    function try_dent(uint id, uint tokensForSale, uint bid)
         public returns (bool ok)
     {
         string memory sig = "dent(uint256,uint256,uint256)";
-        (ok,) = address(flop).call(abi.encodeWithSignature(sig, id, lot, bid));
+        (ok,) = address(flop).call(abi.encodeWithSignature(sig, id, tokensForSale, bid));
     }
     function try_deal(uint id)
         public returns (bool ok)
@@ -62,12 +62,12 @@ contract FlopTest is DSTest {
     Hevm hevm;
 
     Flopper flop;
-    Vat     vat;
-    DSToken gem;
+    CDPEngineInstance     CDPEngine;
+    DSToken tokenCollateral;
 
     address ali;
     address bob;
-    address gal;
+    address daiIncomeReceiver;
 
     function kiss(uint) public pure { }  // arbitrary callback
 
@@ -75,68 +75,68 @@ contract FlopTest is DSTest {
         hevm = Hevm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
         hevm.warp(604411200);
 
-        vat = new Vat();
-        gem = new DSToken('');
+        CDPEngine = new CDPEngineInstance();
+        tokenCollateral = new DSToken('');
 
-        flop = new Flopper(address(vat), address(gem));
+        flop = new Flopper(address(CDPEngine), address(tokenCollateral));
 
         ali = address(new Guy(flop));
         bob = address(new Guy(flop));
-        gal = address(new Gal());
+        daiIncomeReceiver = address(new Gal());
 
-        vat.hope(address(flop));
-        vat.rely(address(flop));
-        gem.approve(address(flop));
+        CDPEngine.hope(address(flop));
+        CDPEngine.addAuthorization(address(flop));
+        tokenCollateral.approve(address(flop));
 
-        vat.suck(address(this), address(this), 1000 ether);
+        CDPEngine.suck(address(this), address(this), 1000 ether);
 
-        vat.move(address(this), ali, 200 ether);
-        vat.move(address(this), bob, 200 ether);
+        CDPEngine.move(address(this), ali, 200 ether);
+        CDPEngine.move(address(this), bob, 200 ether);
     }
     function test_kick() public {
-        assertEq(vat.dai(address(this)), 600 ether);
-        assertEq(gem.balanceOf(address(this)),   0 ether);
-        flop.kick({ lot: 200 ether   // or whatever high starting value
-                  , gal: gal
+        assertEq(CDPEngine.dai(address(this)), 600 ether);
+        assertEq(tokenCollateral.balanceOf(address(this)),   0 ether);
+        flop.kick({ tokensForSale: 200 ether   // or whatever high starting value
+                  , daiIncomeReceiver: daiIncomeReceiver
                   , bid: 0
                   });
         // no value transferred
-        assertEq(vat.dai(address(this)), 600 ether);
-        assertEq(gem.balanceOf(address(this)),   0 ether);
+        assertEq(CDPEngine.dai(address(this)), 600 ether);
+        assertEq(tokenCollateral.balanceOf(address(this)),   0 ether);
     }
     function test_dent() public {
-        uint id = flop.kick({ lot: 200 ether   // or whatever high starting value
-                            , gal: gal
+        uint id = flop.kick({ tokensForSale: 200 ether   // or whatever high starting value
+                            , daiIncomeReceiver: daiIncomeReceiver
                             , bid: 10 ether
                             });
 
         Guy(ali).dent(id, 100 ether, 10 ether);
         // bid taken from bidder
-        assertEq(vat.dai(ali), 190 ether);
-        // gal receives payment
-        assertEq(vat.dai(gal),  10 ether);
+        assertEq(CDPEngine.dai(ali), 190 ether);
+        // daiIncomeReceiver receives payment
+        assertEq(CDPEngine.dai(daiIncomeReceiver),  10 ether);
 
         Guy(bob).dent(id, 80 ether, 10 ether);
         // bid taken from bidder
-        assertEq(vat.dai(bob), 190 ether);
+        assertEq(CDPEngine.dai(bob), 190 ether);
         // prev bidder refunded
-        assertEq(vat.dai(ali), 200 ether);
-        // gal receives no more
-        assertEq(vat.dai(gal), 10 ether);
+        assertEq(CDPEngine.dai(ali), 200 ether);
+        // daiIncomeReceiver receives no more
+        assertEq(CDPEngine.dai(daiIncomeReceiver), 10 ether);
 
         hevm.warp(now + 5 weeks);
-        assertEq(gem.totalSupply(),  0 ether);
-        gem.setOwner(address(flop));
+        assertEq(tokenCollateral.totalSupply(),  0 ether);
+        tokenCollateral.setOwner(address(flop));
         Guy(bob).deal(id);
         // gems minted on demand
-        assertEq(gem.totalSupply(), 80 ether);
+        assertEq(tokenCollateral.totalSupply(), 80 ether);
         // bob gets the winnings
-        assertEq(gem.balanceOf(bob), 80 ether);
+        assertEq(tokenCollateral.balanceOf(bob), 80 ether);
     }
     function test_tick() public {
         // start an auction
-        uint id = flop.kick({ lot: 200 ether   // or whatever high starting value
-                            , gal: gal
+        uint id = flop.kick({ tokensForSale: 200 ether   // or whatever high starting value
+                            , daiIncomeReceiver: daiIncomeReceiver
                             , bid: 10 ether
                             });
         // check no tick
@@ -148,15 +148,15 @@ contract FlopTest is DSTest {
         assertTrue( Guy(ali).try_tick(id));
         // check biddable
         (, uint _lot,,,) = flop.bids(id);
-        // tick should increase the lot by pad (50%) and restart the auction
+        // tick should increase the tokensForSale by pad (50%) and restart the auction
         assertEq(_lot, 300 ether);
         assertTrue( Guy(ali).try_dent(id, 100 ether, 10 ether));
     }
     function test_no_deal_after_end() public {
         // if there are no bids and the auction ends, then it should not
         // be refundable to the creator. Rather, it ticks indefinitely.
-        uint id = flop.kick({ lot: 200 ether   // or whatever high starting value
-                            , gal: gal
+        uint id = flop.kick({ tokensForSale: 200 ether   // or whatever high starting value
+                            , daiIncomeReceiver: daiIncomeReceiver
                             , bid: 10 ether
                             });
         assertTrue(!Guy(ali).try_deal(id));
@@ -168,35 +168,35 @@ contract FlopTest is DSTest {
     function test_yank() public {
         // yanking the auction should refund the last bidder's dai, credit a
         // corresponding amount of sin to the caller of cage, and delete the auction.
-        // in practice, gal == (caller of cage) == (vow address)
-        uint id = flop.kick({ lot: 200 ether   // or whatever high starting value
-                            , gal: gal
+        // in practice, daiIncomeReceiver == (caller of cage) == (debtEngine address)
+        uint id = flop.kick({ tokensForSale: 200 ether   // or whatever high starting value
+                            , daiIncomeReceiver: daiIncomeReceiver
                             , bid: 10 ether
                             });
 
         // confrim initial state expectations
-        assertEq(vat.dai(ali), 200 ether);
-        assertEq(vat.dai(bob), 200 ether);
-        assertEq(vat.dai(gal), 0);
-        assertEq(vat.sin(address(this)), 1000 ether);
+        assertEq(CDPEngine.dai(ali), 200 ether);
+        assertEq(CDPEngine.dai(bob), 200 ether);
+        assertEq(CDPEngine.dai(daiIncomeReceiver), 0);
+        assertEq(CDPEngine.sin(address(this)), 1000 ether);
 
         Guy(ali).dent(id, 100 ether, 10 ether);
         Guy(bob).dent(id, 80 ether, 10 ether);
 
         // confirm the proper state updates have occurred
-        assertEq(vat.dai(ali), 200 ether);  // ali's dai balance is unchanged
-        assertEq(vat.dai(bob), 190 ether);
-        assertEq(vat.dai(gal),  10 ether);
-        assertEq(vat.sin(address(this)), 1000 ether);
+        assertEq(CDPEngine.dai(ali), 200 ether);  // ali's dai balance is unchanged
+        assertEq(CDPEngine.dai(bob), 190 ether);
+        assertEq(CDPEngine.dai(daiIncomeReceiver),  10 ether);
+        assertEq(CDPEngine.sin(address(this)), 1000 ether);
 
         flop.cage();
         flop.yank(id);
 
         // confirm final state
-        assertEq(vat.dai(ali), 200 ether);
-        assertEq(vat.dai(bob), 200 ether);  // bob's bid has been refunded
-        assertEq(vat.dai(gal), 10 ether);
-        assertEq(vat.sin(address(this)), 1010 ether);  // sin assigned to caller of cage()
+        assertEq(CDPEngine.dai(ali), 200 ether);
+        assertEq(CDPEngine.dai(bob), 200 ether);  // bob's bid has been refunded
+        assertEq(CDPEngine.dai(daiIncomeReceiver), 10 ether);
+        assertEq(CDPEngine.sin(address(this)), 1010 ether);  // sin assigned to caller of cage()
         (uint256 _bid, uint256 _lot, address _guy, uint48 _tic, uint48 _end) = flop.bids(id);
         assertEq(_bid, 0);
         assertEq(_lot, 0);
@@ -206,27 +206,27 @@ contract FlopTest is DSTest {
     }
     function test_yank_no_bids() public {
         // with no bidder to refund, yanking the auction should simply create equal
-        // amounts of dai (credited to the gal) and sin (credited to the caller of cage)
-        // in practice, gal == (caller of cage) == (vow address)
-        uint id = flop.kick({ lot: 200 ether   // or whatever high starting value
-                            , gal: gal
+        // amounts of dai (credited to the daiIncomeReceiver) and sin (credited to the caller of cage)
+        // in practice, daiIncomeReceiver == (caller of cage) == (debtEngine address)
+        uint id = flop.kick({ tokensForSale: 200 ether   // or whatever high starting value
+                            , daiIncomeReceiver: daiIncomeReceiver
                             , bid: 10 ether
                             });
 
         // confrim initial state expectations
-        assertEq(vat.dai(ali), 200 ether);
-        assertEq(vat.dai(bob), 200 ether);
-        assertEq(vat.dai(gal), 0);
-        assertEq(vat.sin(address(this)), 1000 ether);
+        assertEq(CDPEngine.dai(ali), 200 ether);
+        assertEq(CDPEngine.dai(bob), 200 ether);
+        assertEq(CDPEngine.dai(daiIncomeReceiver), 0);
+        assertEq(CDPEngine.sin(address(this)), 1000 ether);
 
         flop.cage();
         flop.yank(id);
 
         // confirm final state
-        assertEq(vat.dai(ali), 200 ether);
-        assertEq(vat.dai(bob), 200 ether);
-        assertEq(vat.dai(gal),  10 ether);
-        assertEq(vat.sin(address(this)), 1010 ether);  // sin assigned to caller of cage()
+        assertEq(CDPEngine.dai(ali), 200 ether);
+        assertEq(CDPEngine.dai(bob), 200 ether);
+        assertEq(CDPEngine.dai(daiIncomeReceiver),  10 ether);
+        assertEq(CDPEngine.sin(address(this)), 1010 ether);  // sin assigned to caller of cage()
         (uint256 _bid, uint256 _lot, address _guy, uint48 _tic, uint48 _end) = flop.bids(id);
         assertEq(_bid, 0);
         assertEq(_lot, 0);

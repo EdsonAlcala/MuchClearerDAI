@@ -1,4 +1,4 @@
-/// vow.sol -- Dai settlement module
+/// debtEngine.sol -- Dai settlement module
 
 // Copyright (C) 2018 Rain <rainbreak@riseup.net>
 //
@@ -17,21 +17,21 @@
 
 pragma solidity 0.5.12;
 
-import "./lib.sol";
+import "./commonFunctions.sol";
 
 contract FlopLike {
-    function kick(address gal, uint lot, uint bid) external returns (uint);
+    function kick(address daiIncomeReceiver, uint tokensForSale, uint bid) external returns (uint);
     function cage() external;
-    function live() external returns (uint);
+    function DSRisActive() external returns (uint);
 }
 
 contract FlapLike {
-    function kick(uint lot, uint bid) external returns (uint);
+    function kick(uint tokensForSale, uint bid) external returns (uint);
     function cage(uint) external;
-    function live() external returns (uint);
+    function DSRisActive() external returns (uint);
 }
 
-contract VatLike {
+contract CDPEngineContract {
     function dai (address) external view returns (uint);
     function sin (address) external view returns (uint);
     function heal(uint256) external;
@@ -39,18 +39,18 @@ contract VatLike {
     function nope(address) external;
 }
 
-contract Vow is LibNote {
+contract Vow is LogEmitter {
     // --- Auth ---
-    mapping (address => uint) public wards;
-    function rely(address usr) external note auth { require(live == 1, "Vow/not-live"); wards[usr] = 1; }
-    function deny(address usr) external note auth { wards[usr] = 0; }
-    modifier auth {
-        require(wards[msg.sender] == 1, "Vow/not-authorized");
+    mapping (address => uint) public authorizedAccounts;
+    function addAuthorization(address usr) external emitLog onlyOwners { require(DSRisActive, "Vow/not-DSRisActive"); authorizedAccounts[usr] = 1; }
+    function removeAuthorization(address usr) external emitLog onlyOwners { authorizedAccounts[usr] = false; }
+    modifier onlyOwners {
+        require(authorizedAccounts[msg.sender], "Vow/not-onlyOwnersorized");
         _;
     }
 
     // --- Data ---
-    VatLike public vat;
+    CDPEngineContract public CDPEngine;
     FlapLike public flapper;
     FlopLike public flopper;
 
@@ -59,22 +59,22 @@ contract Vow is LibNote {
     uint256 public Ash;   // on-auction debt      [rad]
 
     uint256 public wait;  // flop delay
-    uint256 public dump;  // flop initial lot size  [wad]
+    uint256 public dump;  // flop initial tokensForSale size  [amount]
     uint256 public sump;  // flop fixed bid size    [rad]
 
-    uint256 public bump;  // flap fixed lot size    [rad]
+    uint256 public bump;  // buyCollateral fixed tokensForSale size    [rad]
     uint256 public hump;  // surplus buffer       [rad]
 
-    uint256 public live;
+    bool public DSRisActive;
 
     // --- Init ---
-    constructor(address vat_, address flapper_, address flopper_) public {
-        wards[msg.sender] = 1;
-        vat     = VatLike(vat_);
+    constructor(address CDPEngine_, address flapper_, address flopper_) public {
+        authorizedAccounts[msg.sender] = true;
+        CDPEngine     = CDPEngineContract(CDPEngine_);
         flapper = FlapLike(flapper_);
         flopper = FlopLike(flopper_);
-        vat.hope(flapper_);
-        live = 1;
+        CDPEngine.hope(flapper_);
+        DSRisActive = true;
     }
 
     // --- Math ---
@@ -89,7 +89,7 @@ contract Vow is LibNote {
     }
 
     // --- Administration ---
-    function file(bytes32 what, uint data) external note auth {
+    function file(bytes32 what, uint data) external emitLog onlyOwners {
         if (what == "wait") wait = data;
         else if (what == "bump") bump = data;
         else if (what == "sump") sump = data;
@@ -98,62 +98,62 @@ contract Vow is LibNote {
         else revert("Vow/file-unrecognized-param");
     }
 
-    function file(bytes32 what, address data) external note auth {
+    function file(bytes32 what, address data) external emitLog onlyOwners {
         if (what == "flapper") {
-            vat.nope(address(flapper));
+            CDPEngine.nope(address(flapper));
             flapper = FlapLike(data);
-            vat.hope(data);
+            CDPEngine.hope(data);
         }
         else if (what == "flopper") flopper = FlopLike(data);
         else revert("Vow/file-unrecognized-param");
     }
 
     // Push to debt-queue
-    function fess(uint tab) external note auth {
+    function fess(uint tab) external emitLog onlyOwners {
         sin[now] = add(sin[now], tab);
         Sin = add(Sin, tab);
     }
     // Pop from debt-queue
-    function flog(uint era) external note {
+    function flog(uint era) external emitLog {
         require(add(era, wait) <= now, "Vow/wait-not-finished");
         Sin = sub(Sin, sin[era]);
         sin[era] = 0;
     }
 
     // Debt settlement
-    function heal(uint rad) external note {
-        require(rad <= vat.dai(address(this)), "Vow/insufficient-surplus");
-        require(rad <= sub(sub(vat.sin(address(this)), Sin), Ash), "Vow/insufficient-debt");
-        vat.heal(rad);
+    function heal(uint rad) external emitLog {
+        require(rad <= CDPEngine.dai(address(this)), "Vow/insufficient-surplus");
+        require(rad <= sub(sub(CDPEngine.sin(address(this)), Sin), Ash), "Vow/insufficient-debt");
+        CDPEngine.heal(rad);
     }
-    function kiss(uint rad) external note {
+    function kiss(uint rad) external emitLog {
         require(rad <= Ash, "Vow/not-enough-ash");
-        require(rad <= vat.dai(address(this)), "Vow/insufficient-surplus");
+        require(rad <= CDPEngine.dai(address(this)), "Vow/insufficient-surplus");
         Ash = sub(Ash, rad);
-        vat.heal(rad);
+        CDPEngine.heal(rad);
     }
 
     // Debt auction
-    function flop() external note returns (uint id) {
-        require(sump <= sub(sub(vat.sin(address(this)), Sin), Ash), "Vow/insufficient-debt");
-        require(vat.dai(address(this)) == 0, "Vow/surplus-not-zero");
+    function flop() external emitLog returns (uint id) {
+        require(sump <= sub(sub(CDPEngine.sin(address(this)), Sin), Ash), "Vow/insufficient-debt");
+        require(CDPEngine.dai(address(this)) == 0, "Vow/surplus-not-zero");
         Ash = add(Ash, sump);
         id = flopper.kick(address(this), dump, sump);
     }
     // Surplus auction
-    function flap() external note returns (uint id) {
-        require(vat.dai(address(this)) >= add(add(vat.sin(address(this)), bump), hump), "Vow/insufficient-surplus");
-        require(sub(sub(vat.sin(address(this)), Sin), Ash) == 0, "Vow/debt-not-zero");
+    function buyCollateral() external emitLog returns (uint id) {
+        require(CDPEngine.dai(address(this)) >= add(add(CDPEngine.sin(address(this)), bump), hump), "Vow/insufficient-surplus");
+        require(sub(sub(CDPEngine.sin(address(this)), Sin), Ash) == 0, "Vow/debt-not-zero");
         id = flapper.kick(bump, 0);
     }
 
-    function cage() external note auth {
-        require(live == 1, "Vow/not-live");
-        live = 0;
+    function cage() external emitLog onlyOwners {
+        require(DSRisActive, "Vow/not-DSRisActive");
+        DSRisActive = false;
         Sin = 0;
         Ash = 0;
-        flapper.cage(vat.dai(address(flapper)));
+        flapper.cage(CDPEngine.dai(address(flapper)));
         flopper.cage();
-        vat.heal(min(vat.dai(address(this)), vat.sin(address(this))));
+        CDPEngine.heal(min(CDPEngine.dai(address(this)), CDPEngine.sin(address(this))));
     }
 }

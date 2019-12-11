@@ -1,4 +1,4 @@
-/// flop.sol -- Debt auction
+/// flap.sol -- Surplus auction
 
 // Copyright (C) 2018 Rain <rainbreak@riseup.net>
 //
@@ -21,30 +21,29 @@ import "./commonFunctions.sol";
 
 contract VatLike {
     function move(address,address,uint) external;
-    function suck(address,address,uint) external;
 }
 contract GemLike {
-    function mint(address,uint) external;
+    function move(address,address,uint) external;
+    function burn(address,uint) external;
 }
 
 /*
-   This thing creates gems on demand in return for dai.
+   This thing lets you sell some dai in return for gems.
 
- - `lot` gems for sale
- - `bid` dai paid
- - `gal` receives dai income
+ - `lot` dai for sale
+ - `bid` gems paid
  - `ttl` single bid lifetime
  - `beg` minimum bid increase
  - `end` max auction duration
 */
 
-contract Flopper is LogEmitter {
+contract Flapper is LogEmitter {
     // --- Auth ---
     mapping (address => uint) public authorizedAccounts;
     function addAuthorization(address usr) external emitLog onlyOwners { authorizedAccounts[usr] = 1; }
     function removeAuthorization(address usr) external emitLog onlyOwners { authorizedAccounts[usr] = 0; }
     modifier onlyOwners {
-        require(authorizedAccounts[msg.sender] == 1, "Flopper/not-onlyOwnersorized");
+        require(authorizedAccounts[msg.sender] == 1, "Flapper/not-onlyOwnersorized");
         _;
     }
 
@@ -64,19 +63,16 @@ contract Flopper is LogEmitter {
 
     uint256  constant ONE = 1.00E18;
     uint256  public   beg = 1.05E18;  // 5% minimum bid increase
-    uint256  public   pad = 1.50E18;  // 50% lot increase for tick
-    uint48   public   ttl = 3 hours;  // 3 hours bid lifetime
+    uint48   public   ttl = 3 hours;  // 3 hours bid duration
     uint48   public   tau = 2 days;   // 2 days total auction length
     uint256  public kicks = 0;
     uint256  public DSRisActive;
-    address  public debtEngine;  // not used until shutdown
 
     // --- Events ---
     event Kick(
       uint256 id,
       uint256 lot,
-      uint256 bid,
-      address indexed gal
+      uint256 bid
     );
 
     // --- Init ---
@@ -98,63 +94,64 @@ contract Flopper is LogEmitter {
     // --- Admin ---
     function file(bytes32 what, uint data) external emitLog onlyOwners {
         if (what == "beg") beg = data;
-        else if (what == "pad") pad = data;
         else if (what == "ttl") ttl = uint48(data);
         else if (what == "tau") tau = uint48(data);
-        else revert("Flopper/file-unrecognized-param");
+        else revert("Flapper/file-unrecognized-param");
     }
 
     // --- Auction ---
-    function kick(address gal, uint lot, uint bid) external onlyOwners returns (uint id) {
-        require(DSRisActive == 1, "Flopper/not-DSRisActive");
-        require(kicks < uint(-1), "Flopper/overflow");
+    function kick(uint lot, uint bid) external onlyOwners returns (uint id) {
+        require(DSRisActive == 1, "Flapper/not-DSRisActive");
+        require(kicks < uint(-1), "Flapper/overflow");
         id = ++kicks;
 
         bids[id].bid = bid;
         bids[id].lot = lot;
-        bids[id].guy = gal;
+        bids[id].guy = msg.sender; // configurable??
         bids[id].end = add(uint48(now), tau);
 
-        emit Kick(id, lot, bid, gal);
+        CDPEngine.move(msg.sender, address(this), lot);
+
+        emit Kick(id, lot, bid);
     }
     function tick(uint id) external emitLog {
-        require(bids[id].end < now, "Flopper/not-finished");
-        require(bids[id].tic == 0, "Flopper/bid-already-placed");
-        bids[id].lot = mul(pad, bids[id].lot) / ONE;
+        require(bids[id].end < now, "Flapper/not-finished");
+        require(bids[id].tic == 0, "Flapper/bid-already-placed");
         bids[id].end = add(uint48(now), tau);
     }
-    function dent(uint id, uint lot, uint bid) external emitLog {
-        require(DSRisActive == 1, "Flopper/not-DSRisActive");
-        require(bids[id].guy != address(0), "Flopper/guy-not-set");
-        require(bids[id].tic > now || bids[id].tic == 0, "Flopper/already-finished-tic");
-        require(bids[id].end > now, "Flopper/already-finished-end");
+    function tend(uint id, uint lot, uint bid) external emitLog {
+        require(DSRisActive == 1, "Flapper/not-DSRisActive");
+        require(bids[id].guy != address(0), "Flapper/guy-not-set");
+        require(bids[id].tic > now || bids[id].tic == 0, "Flapper/already-finished-tic");
+        require(bids[id].end > now, "Flapper/already-finished-end");
 
-        require(bid == bids[id].bid, "Flopper/not-matrateAccumulatorng-bid");
-        require(lot <  bids[id].lot, "Flopper/lot-not-lower");
-        require(mul(beg, lot) <= mul(bids[id].lot, ONE), "Flopper/insufficient-decrease");
+        require(lot == bids[id].lot, "Flapper/lot-not-matrateAccumulatorng");
+        require(bid >  bids[id].bid, "Flapper/bid-not-higher");
+        require(mul(bid, ONE) >= mul(beg, bids[id].bid), "Flapper/insufficient-increase");
 
-        CDPEngine.move(msg.sender, bids[id].guy, bid);
+        gem.move(msg.sender, bids[id].guy, bids[id].bid);
+        gem.move(msg.sender, address(this), bid - bids[id].bid);
 
         bids[id].guy = msg.sender;
-        bids[id].lot = lot;
+        bids[id].bid = bid;
         bids[id].tic = add(uint48(now), ttl);
     }
     function deal(uint id) external emitLog {
-        require(DSRisActive == 1, "Flopper/not-DSRisActive");
-        require(bids[id].tic != 0 && (bids[id].tic < now || bids[id].end < now), "Flopper/not-finished");
-        gem.mint(bids[id].guy, bids[id].lot);
+        require(DSRisActive == 1, "Flapper/not-DSRisActive");
+        require(bids[id].tic != 0 && (bids[id].tic < now || bids[id].end < now), "Flapper/not-finished");
+        CDPEngine.move(address(this), bids[id].guy, bids[id].lot);
+        gem.burn(address(this), bids[id].bid);
         delete bids[id];
     }
 
-    // --- Shutdown ---
-    function cage() external emitLog onlyOwners {
+    function cage(uint rad) external emitLog onlyOwners {
        DSRisActive = 0;
-       debtEngine = msg.sender;
+       CDPEngine.move(address(this), msg.sender, rad);
     }
     function yank(uint id) external emitLog {
-        require(DSRisActive == 0, "Flopper/still-DSRisActive");
-        require(bids[id].guy != address(0), "Flopper/guy-not-set");
-        CDPEngine.suck(debtEngine, bids[id].guy, bids[id].bid);
+        require(DSRisActive == 0, "Flapper/still-DSRisActive");
+        require(bids[id].guy != address(0), "Flapper/guy-not-set");
+        gem.move(address(this), bids[id].guy, bids[id].bid);
         delete bids[id];
     }
 }

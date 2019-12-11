@@ -3,26 +3,26 @@ pragma solidity 0.5.12;
 import "ds-test/test.sol";
 import "ds-token/token.sol";
 
-import {Vat} from '../vat.sol';
+import {CDPEngineInstance} from '../CDPEngine.sol';
 import {Cat} from '../cat.sol';
-import {Vow} from '../vow.sol';
+import {Vow} from '../debtEngine.sol';
 import {Jug} from '../jug.sol';
-import {GemJoin, ETHJoin, DaiJoin} from '../join.sol';
+import {TokenAdapter, ETHAdapter, DAItoTokenAdapter} from '../enableDSR.sol';
 
-import {Flipper} from './flip.t.sol';
+import {CollateralSellerContract} from './liquidator.t.sol';
 import {Flopper} from './flop.t.sol';
-import {Flapper} from './flap.t.sol';
+import {CollateralBuyerContract} from './buyCollateral.t.sol';
 
 
 contract Hevm {
     function warp(uint256) public;
 }
 
-contract TestVat is Vat {
+contract TestVat is CDPEngineInstance {
     uint256 constant ONE = 10 ** 27;
-    function mint(address usr, uint wad) public {
-        dai[usr] += wad * ONE;
-        debt += wad * ONE;
+    function mint(address usr, uint amount) public {
+        dai[usr] += amount * ONE;
+        debt += amount * ONE;
     }
     function balanceOf(address usr) public view returns (uint) {
         return dai[usr] / ONE;
@@ -30,15 +30,15 @@ contract TestVat is Vat {
 }
 
 contract TestVow is Vow {
-    constructor(address vat, address flapper, address flopper)
-        public Vow(vat, flapper, flopper) {}
+    constructor(address CDPEngine, address flapper, address flopper)
+        public Vow(CDPEngine, flapper, flopper) {}
     // Total deficit
     function Awe() public view returns (uint) {
-        return vat.sin(address(this));
+        return CDPEngine.sin(address(this));
     }
     // Total surplus
     function Joy() public view returns (uint) {
-        return vat.dai(address(this));
+        return CDPEngine.dai(address(this));
     }
     // Unqueued, pre-auction debt
     function Woe() public view returns (uint) {
@@ -47,9 +47,9 @@ contract TestVow is Vow {
 }
 
 contract Usr {
-    Vat public vat;
-    constructor(Vat vat_) public {
-        vat = vat_;
+    CDPEngineInstance public CDPEngine;
+    constructor(CDPEngineInstance CDPEngine_) public {
+        CDPEngine = CDPEngine_;
     }
     function try_call(address addr, bytes calldata data) external returns (bool) {
         bytes memory _data = data;
@@ -65,7 +65,7 @@ contract Usr {
         string memory sig = "frob(bytes32,address,address,address,int256,int256)";
         bytes memory data = abi.encodeWithSignature(sig, ilk, u, v, w, dink, dart);
 
-        bytes memory can_call = abi.encodeWithSignature("try_call(address,bytes)", vat, data);
+        bytes memory can_call = abi.encodeWithSignature("try_call(address,bytes)", CDPEngine, data);
         (bool ok, bytes memory success) = address(this).call(can_call);
 
         ok = abi.decode(success, (bool));
@@ -75,111 +75,111 @@ contract Usr {
         string memory sig = "fork(bytes32,address,address,int256,int256)";
         bytes memory data = abi.encodeWithSignature(sig, ilk, src, dst, dink, dart);
 
-        bytes memory can_call = abi.encodeWithSignature("try_call(address,bytes)", vat, data);
+        bytes memory can_call = abi.encodeWithSignature("try_call(address,bytes)", CDPEngine, data);
         (bool ok, bytes memory success) = address(this).call(can_call);
 
         ok = abi.decode(success, (bool));
         if (ok) return true;
     }
     function frob(bytes32 ilk, address u, address v, address w, int dink, int dart) public {
-        vat.frob(ilk, u, v, w, dink, dart);
+        CDPEngine.frob(ilk, u, v, w, dink, dart);
     }
     function fork(bytes32 ilk, address src, address dst, int dink, int dart) public {
-        vat.fork(ilk, src, dst, dink, dart);
+        CDPEngine.fork(ilk, src, dst, dink, dart);
     }
     function hope(address usr) public {
-        vat.hope(usr);
+        CDPEngine.hope(usr);
     }
 }
 
 
 contract FrobTest is DSTest {
-    TestVat vat;
+    TestVat CDPEngine;
     DSToken gold;
     Jug     jug;
 
-    GemJoin gemA;
+    TokenAdapter gemA;
     address me;
 
     function try_frob(bytes32 ilk, int ink, int art) public returns (bool ok) {
         string memory sig = "frob(bytes32,address,address,address,int256,int256)";
         address self = address(this);
-        (ok,) = address(vat).call(abi.encodeWithSignature(sig, ilk, self, self, self, ink, art));
+        (ok,) = address(CDPEngine).call(abi.encodeWithSignature(sig, ilk, self, self, self, ink, art));
     }
 
-    function ray(uint wad) internal pure returns (uint) {
-        return wad * 10 ** 9;
+    function ray(uint amount) internal pure returns (uint) {
+        return amount * 10 ** 9;
     }
 
     function setUp() public {
-        vat = new TestVat();
+        CDPEngine = new TestVat();
 
         gold = new DSToken("GEM");
         gold.mint(1000 ether);
 
-        vat.init("gold");
-        gemA = new GemJoin(address(vat), "gold", address(gold));
+        CDPEngine.init("gold");
+        gemA = new TokenAdapter(address(CDPEngine), "gold", address(gold));
 
-        vat.file("gold", "spot",    ray(1 ether));
-        vat.file("gold", "line", rad(1000 ether));
-        vat.file("Line",         rad(1000 ether));
-        jug = new Jug(address(vat));
+        CDPEngine.file("gold", "spot",    ray(1 ether));
+        CDPEngine.file("gold", "line", rad(1000 ether));
+        CDPEngine.file("Line",         rad(1000 ether));
+        jug = new Jug(address(CDPEngine));
         jug.init("gold");
-        vat.rely(address(jug));
+        CDPEngine.addAuthorization(address(jug));
 
         gold.approve(address(gemA));
-        gold.approve(address(vat));
+        gold.approve(address(CDPEngine));
 
-        vat.rely(address(vat));
-        vat.rely(address(gemA));
+        CDPEngine.addAuthorization(address(CDPEngine));
+        CDPEngine.addAuthorization(address(gemA));
 
-        gemA.join(address(this), 1000 ether);
+        gemA.enableDSR(address(this), 1000 ether);
 
         me = address(this);
     }
 
-    function gem(bytes32 ilk, address urn) internal view returns (uint) {
-        return vat.gem(ilk, urn);
+    function tokenCollateral(bytes32 ilk, address urn) internal view returns (uint) {
+        return CDPEngine.tokenCollateral(ilk, urn);
     }
     function ink(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = vat.urns(ilk, urn); art_;
+        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); art_;
         return ink_;
     }
     function art(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = vat.urns(ilk, urn); ink_;
+        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); ink_;
         return art_;
     }
 
     function test_setup() public {
         assertEq(gold.balanceOf(address(gemA)), 1000 ether);
-        assertEq(gem("gold",    address(this)), 1000 ether);
+        assertEq(tokenCollateral("gold",    address(this)), 1000 ether);
     }
-    function test_join() public {
+    function test_enableDSR() public {
         address urn = address(this);
         gold.mint(500 ether);
         assertEq(gold.balanceOf(address(this)),    500 ether);
         assertEq(gold.balanceOf(address(gemA)),   1000 ether);
-        gemA.join(urn,                             500 ether);
+        gemA.enableDSR(urn,                             500 ether);
         assertEq(gold.balanceOf(address(this)),      0 ether);
         assertEq(gold.balanceOf(address(gemA)),   1500 ether);
-        gemA.exit(urn,                             250 ether);
+        gemA.disableDSR(urn,                             250 ether);
         assertEq(gold.balanceOf(address(this)),    250 ether);
         assertEq(gold.balanceOf(address(gemA)),   1250 ether);
     }
     function test_lock() public {
         assertEq(ink("gold", address(this)),    0 ether);
-        assertEq(gem("gold", address(this)), 1000 ether);
-        vat.frob("gold", me, me, me, 6 ether, 0);
+        assertEq(tokenCollateral("gold", address(this)), 1000 ether);
+        CDPEngine.frob("gold", me, me, me, 6 ether, 0);
         assertEq(ink("gold", address(this)),   6 ether);
-        assertEq(gem("gold", address(this)), 994 ether);
-        vat.frob("gold", me, me, me, -6 ether, 0);
+        assertEq(tokenCollateral("gold", address(this)), 994 ether);
+        CDPEngine.frob("gold", me, me, me, -6 ether, 0);
         assertEq(ink("gold", address(this)),    0 ether);
-        assertEq(gem("gold", address(this)), 1000 ether);
+        assertEq(tokenCollateral("gold", address(this)), 1000 ether);
     }
     function test_calm() public {
         // calm means that the debt ceiling is not exceeded
         // it's ok to increase debt as long as you remain calm
-        vat.file("gold", 'line', rad(10 ether));
+        CDPEngine.file("gold", 'line', rad(10 ether));
         assertTrue( try_frob("gold", 10 ether, 9 ether));
         // only if under debt ceiling
         assertTrue(!try_frob("gold",  0 ether, 2 ether));
@@ -187,24 +187,24 @@ contract FrobTest is DSTest {
     function test_cool() public {
         // cool means that the debt has decreased
         // it's ok to be over the debt ceiling as long as you're cool
-        vat.file("gold", 'line', rad(10 ether));
+        CDPEngine.file("gold", 'line', rad(10 ether));
         assertTrue(try_frob("gold", 10 ether,  8 ether));
-        vat.file("gold", 'line', rad(5 ether));
+        CDPEngine.file("gold", 'line', rad(5 ether));
         // can decrease debt when over ceiling
         assertTrue(try_frob("gold",  0 ether, -1 ether));
     }
     function test_safe() public {
         // safe means that the cdp is not risky
         // you can't frob a cdp into unsafe
-        vat.frob("gold", me, me, me, 10 ether, 5 ether);                // safe draw
+        CDPEngine.frob("gold", me, me, me, 10 ether, 5 ether);                // safe draw
         assertTrue(!try_frob("gold", 0 ether, 6 ether));  // unsafe draw
     }
     function test_nice() public {
         // nice means that the collateral has increased or the debt has
         // decreased. remaining unsafe is ok as long as you're nice
 
-        vat.frob("gold", me, me, me, 10 ether, 10 ether);
-        vat.file("gold", 'spot', ray(0.5 ether));  // now unsafe
+        CDPEngine.frob("gold", me, me, me, 10 ether, 10 ether);
+        CDPEngine.file("gold", 'spot', ray(0.5 ether));  // now unsafe
 
         // debt can't increase if unsafe
         assertTrue(!try_frob("gold",  0 ether,  1 ether));
@@ -223,26 +223,26 @@ contract FrobTest is DSTest {
 
         // ink can decrease if end state is safe
         assertTrue( this.try_frob("gold", -1 ether, -4 ether));
-        vat.file("gold", 'spot', ray(0.4 ether));  // now unsafe
+        CDPEngine.file("gold", 'spot', ray(0.4 ether));  // now unsafe
         // debt can increase if end state is safe
         assertTrue( this.try_frob("gold",  5 ether, 1 ether));
     }
 
-    function rad(uint wad) internal pure returns (uint) {
-        return wad * 10 ** 27;
+    function rad(uint amount) internal pure returns (uint) {
+        return amount * 10 ** 27;
     }
     function test_alt_callers() public {
-        Usr ali = new Usr(vat);
-        Usr bob = new Usr(vat);
-        Usr che = new Usr(vat);
+        Usr ali = new Usr(CDPEngine);
+        Usr bob = new Usr(CDPEngine);
+        Usr che = new Usr(CDPEngine);
 
         address a = address(ali);
         address b = address(bob);
         address c = address(che);
 
-        vat.slip("gold", a, int(rad(20 ether)));
-        vat.slip("gold", b, int(rad(20 ether)));
-        vat.slip("gold", c, int(rad(20 ether)));
+        CDPEngine.slip("gold", a, int(rad(20 ether)));
+        CDPEngine.slip("gold", b, int(rad(20 ether)));
+        CDPEngine.slip("gold", c, int(rad(20 ether)));
 
         ali.frob("gold", a, a, a, 10 ether, 5 ether);
 
@@ -271,8 +271,8 @@ contract FrobTest is DSTest {
         assertTrue( ali.can_frob("gold", a, a, b,  0 ether,  1 ether));
         assertTrue( ali.can_frob("gold", a, a, c,  0 ether,  1 ether));
 
-        vat.mint(address(bob), 1 ether);
-        vat.mint(address(che), 1 ether);
+        CDPEngine.mint(address(bob), 1 ether);
+        CDPEngine.mint(address(che), 1 ether);
 
         // anyone can wipe
         assertTrue( ali.can_frob("gold", a, a, a,  0 ether, -1 ether));
@@ -285,17 +285,17 @@ contract FrobTest is DSTest {
     }
 
     function test_hope() public {
-        Usr ali = new Usr(vat);
-        Usr bob = new Usr(vat);
-        Usr che = new Usr(vat);
+        Usr ali = new Usr(CDPEngine);
+        Usr bob = new Usr(CDPEngine);
+        Usr che = new Usr(CDPEngine);
 
         address a = address(ali);
         address b = address(bob);
         address c = address(che);
 
-        vat.slip("gold", a, int(rad(20 ether)));
-        vat.slip("gold", b, int(rad(20 ether)));
-        vat.slip("gold", c, int(rad(20 ether)));
+        CDPEngine.slip("gold", a, int(rad(20 ether)));
+        CDPEngine.slip("gold", b, int(rad(20 ether)));
+        CDPEngine.slip("gold", c, int(rad(20 ether)));
 
         ali.frob("gold", a, a, a, 10 ether, 5 ether);
 
@@ -314,7 +314,7 @@ contract FrobTest is DSTest {
 
     function test_dust() public {
         assertTrue( try_frob("gold", 9 ether,  1 ether));
-        vat.file("gold", "dust", rad(5 ether));
+        CDPEngine.file("gold", "dust", rad(5 ether));
         assertTrue(!try_frob("gold", 5 ether,  2 ether));
         assertTrue( try_frob("gold", 0 ether,  5 ether));
         assertTrue(!try_frob("gold", 0 ether, -5 ether));
@@ -323,28 +323,28 @@ contract FrobTest is DSTest {
 }
 
 contract JoinTest is DSTest {
-    TestVat vat;
-    DSToken gem;
-    GemJoin gemA;
-    ETHJoin ethA;
-    DaiJoin daiA;
+    TestVat CDPEngine;
+    DSToken tokenCollateral;
+    TokenAdapter gemA;
+    ETHAdapter ethA;
+    DAItoTokenAdapter daiA;
     DSToken dai;
     address me;
 
     function setUp() public {
-        vat = new TestVat();
-        vat.init("eth");
+        CDPEngine = new TestVat();
+        CDPEngine.init("eth");
 
-        gem  = new DSToken("Gem");
-        gemA = new GemJoin(address(vat), "gem", address(gem));
-        vat.rely(address(gemA));
+        tokenCollateral  = new DSToken("Gem");
+        gemA = new TokenAdapter(address(CDPEngine), "tokenCollateral", address(tokenCollateral));
+        CDPEngine.addAuthorization(address(gemA));
 
-        ethA = new ETHJoin(address(vat), "eth");
-        vat.rely(address(ethA));
+        ethA = new ETHAdapter(address(CDPEngine), "eth");
+        CDPEngine.addAuthorization(address(ethA));
 
         dai  = new DSToken("Dai");
-        daiA = new DaiJoin(address(vat), address(dai));
-        vat.rely(address(daiA));
+        daiA = new DAItoTokenAdapter(address(CDPEngine), address(dai));
+        CDPEngine.addAuthorization(address(daiA));
         dai.setOwner(address(daiA));
 
         me = address(this);
@@ -353,65 +353,65 @@ contract JoinTest is DSTest {
         string memory sig = "cage()";
         (ok,) = a.call(abi.encodeWithSignature(sig));
     }
-    function try_join_gem(address usr, uint wad) public returns (bool ok) {
-        string memory sig = "join(address,uint256)";
-        (ok,) = address(gemA).call(abi.encodeWithSignature(sig, usr, wad));
+    function try_enableDSR_gem(address usr, uint amount) public returns (bool ok) {
+        string memory sig = "enableDSR(address,uint256)";
+        (ok,) = address(gemA).call(abi.encodeWithSignature(sig, usr, amount));
     }
-    function try_join_eth(address usr) public payable returns (bool ok) {
-        string memory sig = "join(address)";
+    function try_enableDSR_eth(address usr) public payable returns (bool ok) {
+        string memory sig = "enableDSR(address)";
         (ok,) = address(ethA).call.value(msg.value)(abi.encodeWithSignature(sig, usr));
     }
-    function try_exit_dai(address usr, uint wad) public returns (bool ok) {
-        string memory sig = "exit(address,uint256)";
-        (ok,) = address(daiA).call(abi.encodeWithSignature(sig, usr, wad));
+    function try_disableDSR_dai(address usr, uint amount) public returns (bool ok) {
+        string memory sig = "disableDSR(address,uint256)";
+        (ok,) = address(daiA).call(abi.encodeWithSignature(sig, usr, amount));
     }
     function () external payable {}
-    function test_gem_join() public {
-        gem.mint(20 ether);
-        gem.approve(address(gemA), 20 ether);
-        assertTrue( try_join_gem(address(this), 10 ether));
-        assertEq(vat.gem("gem", me), 10 ether);
+    function test_gem_enableDSR() public {
+        tokenCollateral.mint(20 ether);
+        tokenCollateral.approve(address(gemA), 20 ether);
+        assertTrue( try_enableDSR_gem(address(this), 10 ether));
+        assertEq(CDPEngine.tokenCollateral("tokenCollateral", me), 10 ether);
         assertTrue( try_cage(address(gemA)));
-        assertTrue(!try_join_gem(address(this), 10 ether));
-        assertEq(vat.gem("gem", me), 10 ether);
+        assertTrue(!try_enableDSR_gem(address(this), 10 ether));
+        assertEq(CDPEngine.tokenCollateral("tokenCollateral", me), 10 ether);
     }
-    function test_eth_join() public {
-        assertTrue( this.try_join_eth.value(10 ether)(address(this)));
-        assertEq(vat.gem("eth", me), 10 ether);
+    function test_eth_enableDSR() public {
+        assertTrue( this.try_enableDSR_eth.value(10 ether)(address(this)));
+        assertEq(CDPEngine.tokenCollateral("eth", me), 10 ether);
         assertTrue( try_cage(address(ethA)));
-        assertTrue(!this.try_join_eth.value(10 ether)(address(this)));
-        assertEq(vat.gem("eth", me), 10 ether);
+        assertTrue(!this.try_enableDSR_eth.value(10 ether)(address(this)));
+        assertEq(CDPEngine.tokenCollateral("eth", me), 10 ether);
     }
-    function test_eth_exit() public {
+    function test_eth_disableDSR() public {
         address payable urn = address(this);
-        ethA.join.value(50 ether)(urn);
-        ethA.exit(urn, 10 ether);
-        assertEq(vat.gem("eth", me), 40 ether);
+        ethA.enableDSR.value(50 ether)(urn);
+        ethA.disableDSR(urn, 10 ether);
+        assertEq(CDPEngine.tokenCollateral("eth", me), 40 ether);
     }
-    function rad(uint wad) internal pure returns (uint) {
-        return wad * 10 ** 27;
+    function rad(uint amount) internal pure returns (uint) {
+        return amount * 10 ** 27;
     }
-    function test_dai_exit() public {
+    function test_dai_disableDSR() public {
         address urn = address(this);
-        vat.mint(address(this), 100 ether);
-        vat.hope(address(daiA));
-        assertTrue( try_exit_dai(urn, 40 ether));
+        CDPEngine.mint(address(this), 100 ether);
+        CDPEngine.hope(address(daiA));
+        assertTrue( try_disableDSR_dai(urn, 40 ether));
         assertEq(dai.balanceOf(address(this)), 40 ether);
-        assertEq(vat.dai(me),              rad(60 ether));
+        assertEq(CDPEngine.dai(me),              rad(60 ether));
         assertTrue( try_cage(address(daiA)));
-        assertTrue(!try_exit_dai(urn, 40 ether));
+        assertTrue(!try_disableDSR_dai(urn, 40 ether));
         assertEq(dai.balanceOf(address(this)), 40 ether);
-        assertEq(vat.dai(me),              rad(60 ether));
+        assertEq(CDPEngine.dai(me),              rad(60 ether));
     }
-    function test_dai_exit_join() public {
+    function test_dai_disableDSR_enableDSR() public {
         address urn = address(this);
-        vat.mint(address(this), 100 ether);
-        vat.hope(address(daiA));
-        daiA.exit(urn, 60 ether);
+        CDPEngine.mint(address(this), 100 ether);
+        CDPEngine.hope(address(daiA));
+        daiA.disableDSR(urn, 60 ether);
         dai.approve(address(daiA), uint(-1));
-        daiA.join(urn, 30 ether);
+        daiA.enableDSR(urn, 30 ether);
         assertEq(dai.balanceOf(address(this)),     30 ether);
-        assertEq(vat.dai(me),                  rad(70 ether));
+        assertEq(CDPEngine.dai(me),                  rad(70 ether));
     }
     function test_fallback_reverts() public {
         (bool ok,) = address(ethA).call("invalid calldata");
@@ -422,11 +422,11 @@ contract JoinTest is DSTest {
         assertTrue(!ok);
     }
     function test_cage_no_access() public {
-        gemA.deny(address(this));
+        gemA.removeAuthorization(address(this));
         assertTrue(!try_cage(address(gemA)));
-        ethA.deny(address(this));
+        ethA.removeAuthorization(address(this));
         assertTrue(!try_cage(address(ethA)));
-        daiA.deny(address(this));
+        daiA.removeAuthorization(address(this));
         assertTrue(!try_cage(address(daiA)));
     }
 }
@@ -434,22 +434,22 @@ contract JoinTest is DSTest {
 contract FlipLike {
     struct Bid {
         uint256 bid;
-        uint256 lot;
+        uint256 tokensForSale;
         address guy;  // high bidder
         uint48  tic;  // expiry time
         uint48  end;
         address urn;
-        address gal;
+        address daiIncomeReceiver;
         uint256 tab;
     }
     function bids(uint) public view returns (
         uint256 bid,
-        uint256 lot,
+        uint256 tokensForSale,
         address guy,
         uint48  tic,
         uint48  end,
         address usr,
-        address gal,
+        address daiIncomeReceiver,
         uint256 tab
     );
 }
@@ -457,17 +457,17 @@ contract FlipLike {
 contract BiteTest is DSTest {
     Hevm hevm;
 
-    TestVat vat;
-    TestVow vow;
+    TestVat CDPEngine;
+    TestVow debtEngine;
     Cat     cat;
     DSToken gold;
     Jug     jug;
 
-    GemJoin gemA;
+    TokenAdapter gemA;
 
-    Flipper flip;
+    CollateralSellerContract liquidator;
     Flopper flop;
-    Flapper flap;
+    CollateralBuyerContract buyCollateral;
 
     DSToken gov;
 
@@ -476,25 +476,25 @@ contract BiteTest is DSTest {
     function try_frob(bytes32 ilk, int ink, int art) public returns (bool ok) {
         string memory sig = "frob(bytes32,address,address,address,int256,int256)";
         address self = address(this);
-        (ok,) = address(vat).call(abi.encodeWithSignature(sig, ilk, self, self, self, ink, art));
+        (ok,) = address(CDPEngine).call(abi.encodeWithSignature(sig, ilk, self, self, self, ink, art));
     }
 
-    function ray(uint wad) internal pure returns (uint) {
-        return wad * 10 ** 9;
+    function ray(uint amount) internal pure returns (uint) {
+        return amount * 10 ** 9;
     }
-    function rad(uint wad) internal pure returns (uint) {
-        return wad * 10 ** 27;
+    function rad(uint amount) internal pure returns (uint) {
+        return amount * 10 ** 27;
     }
 
-    function gem(bytes32 ilk, address urn) internal view returns (uint) {
-        return vat.gem(ilk, urn);
+    function tokenCollateral(bytes32 ilk, address urn) internal view returns (uint) {
+        return CDPEngine.tokenCollateral(ilk, urn);
     }
     function ink(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = vat.urns(ilk, urn); art_;
+        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); art_;
         return ink_;
     }
     function art(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = vat.urns(ilk, urn); ink_;
+        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); ink_;
         return art_;
     }
 
@@ -505,162 +505,162 @@ contract BiteTest is DSTest {
         gov = new DSToken('GOV');
         gov.mint(100 ether);
 
-        vat = new TestVat();
-        vat = vat;
+        CDPEngine = new TestVat();
+        CDPEngine = CDPEngine;
 
-        flap = new Flapper(address(vat), address(gov));
-        flop = new Flopper(address(vat), address(gov));
+        buyCollateral = new CollateralBuyerContract(address(CDPEngine), address(gov));
+        flop = new Flopper(address(CDPEngine), address(gov));
 
-        vow = new TestVow(address(vat), address(flap), address(flop));
-        flap.rely(address(vow));
-        flop.rely(address(vow));
+        debtEngine = new TestVow(address(CDPEngine), address(buyCollateral), address(flop));
+        buyCollateral.addAuthorization(address(debtEngine));
+        flop.addAuthorization(address(debtEngine));
 
-        jug = new Jug(address(vat));
+        jug = new Jug(address(CDPEngine));
         jug.init("gold");
-        jug.file("vow", address(vow));
-        vat.rely(address(jug));
+        jug.file("debtEngine", address(debtEngine));
+        CDPEngine.addAuthorization(address(jug));
 
-        cat = new Cat(address(vat));
-        cat.file("vow", address(vow));
-        vat.rely(address(cat));
-        vow.rely(address(cat));
+        cat = new Cat(address(CDPEngine));
+        cat.file("debtEngine", address(debtEngine));
+        CDPEngine.addAuthorization(address(cat));
+        debtEngine.addAuthorization(address(cat));
 
         gold = new DSToken("GEM");
         gold.mint(1000 ether);
 
-        vat.init("gold");
-        gemA = new GemJoin(address(vat), "gold", address(gold));
-        vat.rely(address(gemA));
+        CDPEngine.init("gold");
+        gemA = new TokenAdapter(address(CDPEngine), "gold", address(gold));
+        CDPEngine.addAuthorization(address(gemA));
         gold.approve(address(gemA));
-        gemA.join(address(this), 1000 ether);
+        gemA.enableDSR(address(this), 1000 ether);
 
-        vat.file("gold", "spot", ray(1 ether));
-        vat.file("gold", "line", rad(1000 ether));
-        vat.file("Line",         rad(1000 ether));
-        flip = new Flipper(address(vat), "gold");
-        flip.rely(address(cat));
-        cat.file("gold", "flip", address(flip));
-        cat.file("gold", "chop", ray(1 ether));
+        CDPEngine.file("gold", "spot", ray(1 ether));
+        CDPEngine.file("gold", "line", rad(1000 ether));
+        CDPEngine.file("Line",         rad(1000 ether));
+        liquidator = new CollateralSellerContract(address(CDPEngine), "gold");
+        liquidator.addAuthorization(address(cat));
+        cat.file("gold", "liquidator", address(liquidator));
+        cat.file("gold", "liquidatorPenalty", ray(1 ether));
 
-        vat.rely(address(flip));
-        vat.rely(address(flap));
-        vat.rely(address(flop));
+        CDPEngine.addAuthorization(address(liquidator));
+        CDPEngine.addAuthorization(address(buyCollateral));
+        CDPEngine.addAuthorization(address(flop));
 
-        vat.hope(address(flip));
-        vat.hope(address(flop));
-        gold.approve(address(vat));
-        gov.approve(address(flap));
+        CDPEngine.hope(address(liquidator));
+        CDPEngine.hope(address(flop));
+        gold.approve(address(CDPEngine));
+        gov.approve(address(buyCollateral));
 
         me = address(this);
     }
 
     function test_bite_under_lump() public {
-        vat.file("gold", 'spot', ray(2.5 ether));
-        vat.frob("gold", me, me, me, 40 ether, 100 ether);
+        CDPEngine.file("gold", 'spot', ray(2.5 ether));
+        CDPEngine.frob("gold", me, me, me, 40 ether, 100 ether);
         // tag=4, mat=2
-        vat.file("gold", 'spot', ray(2 ether));  // now unsafe
+        CDPEngine.file("gold", 'spot', ray(2 ether));  // now unsafe
 
-        cat.file("gold", "lump", 50 ether);
-        cat.file("gold", "chop", ray(1.1 ether));
+        cat.file("gold", "liquidatorAmount", 50 ether);
+        cat.file("gold", "liquidatorPenalty", ray(1.1 ether));
 
-        uint auction = cat.bite("gold", address(this));
+        uint auction = cat.CDPLiquidation("gold", address(this));
         // the full CDP is liquidated
         assertEq(ink("gold", address(this)), 0);
         assertEq(art("gold", address(this)), 0);
-        // all debt goes to the vow
-        assertEq(vow.Awe(), rad(100 ether));
+        // all debt goes to the debtEngine
+        assertEq(debtEngine.Awe(), rad(100 ether));
         // auction is for all collateral
-        (, uint lot,,,,,, uint tab) = FlipLike(address(flip)).bids(auction);
-        assertEq(lot,        40 ether);
+        (, uint tokensForSale,,,,,, uint tab) = FlipLike(address(liquidator)).bids(auction);
+        assertEq(tokensForSale,        40 ether);
         assertEq(tab,   rad(110 ether));
     }
     function test_bite_over_lump() public {
-        vat.file("gold", 'spot', ray(2.5 ether));
-        vat.frob("gold", me, me, me, 40 ether, 100 ether);
+        CDPEngine.file("gold", 'spot', ray(2.5 ether));
+        CDPEngine.frob("gold", me, me, me, 40 ether, 100 ether);
         // tag=4, mat=2
-        vat.file("gold", 'spot', ray(2 ether));  // now unsafe
+        CDPEngine.file("gold", 'spot', ray(2 ether));  // now unsafe
 
-        cat.file("gold", "chop", ray(1.1 ether));
-        cat.file("gold", "lump", 30 ether);
+        cat.file("gold", "liquidatorPenalty", ray(1.1 ether));
+        cat.file("gold", "liquidatorAmount", 30 ether);
 
-        uint auction = cat.bite("gold", address(this));
+        uint auction = cat.CDPLiquidation("gold", address(this));
         // the CDP is partially liquidated
         assertEq(ink("gold", address(this)), 10 ether);
         assertEq(art("gold", address(this)), 25 ether);
-        // a fraction of the debt goes to the vow
-        assertEq(vow.Awe(), rad(75 ether));
+        // a fraction of the debt goes to the debtEngine
+        assertEq(debtEngine.Awe(), rad(75 ether));
         // auction is for a fraction of the collateral
-        (, uint lot,,,,,, uint tab) = FlipLike(address(flip)).bids(auction);
-        assertEq(lot,       30 ether);
+        (, uint tokensForSale,,,,,, uint tab) = FlipLike(address(liquidator)).bids(auction);
+        assertEq(tokensForSale,       30 ether);
         assertEq(tab,   rad(82.5 ether));
     }
 
     function test_happy_bite() public {
         // spot = tag / (par . mat)
         // tag=5, mat=2
-        vat.file("gold", 'spot', ray(2.5 ether));
-        vat.frob("gold", me, me, me, 40 ether, 100 ether);
+        CDPEngine.file("gold", 'spot', ray(2.5 ether));
+        CDPEngine.frob("gold", me, me, me, 40 ether, 100 ether);
 
         // tag=4, mat=2
-        vat.file("gold", 'spot', ray(2 ether));  // now unsafe
+        CDPEngine.file("gold", 'spot', ray(2 ether));  // now unsafe
 
         assertEq(ink("gold", address(this)),  40 ether);
         assertEq(art("gold", address(this)), 100 ether);
-        assertEq(vow.Woe(), 0 ether);
-        assertEq(gem("gold", address(this)), 960 ether);
+        assertEq(debtEngine.Woe(), 0 ether);
+        assertEq(tokenCollateral("gold", address(this)), 960 ether);
 
-        cat.file("gold", "lump", 100 ether);  // => bite everything
-        uint auction = cat.bite("gold", address(this));
+        cat.file("gold", "liquidatorAmount", 100 ether);  // => CDPLiquidation everything
+        uint auction = cat.CDPLiquidation("gold", address(this));
         assertEq(ink("gold", address(this)), 0);
         assertEq(art("gold", address(this)), 0);
-        assertEq(vow.sin(now),   rad(100 ether));
-        assertEq(gem("gold", address(this)), 960 ether);
+        assertEq(debtEngine.sin(now),   rad(100 ether));
+        assertEq(tokenCollateral("gold", address(this)), 960 ether);
 
-        assertEq(vat.balanceOf(address(vow)),    0 ether);
-        flip.tend(auction, 40 ether,   rad(1 ether));
-        flip.tend(auction, 40 ether, rad(100 ether));
+        assertEq(CDPEngine.balanceOf(address(debtEngine)),    0 ether);
+        liquidator.tend(auction, 40 ether,   rad(1 ether));
+        liquidator.tend(auction, 40 ether, rad(100 ether));
 
-        assertEq(vat.balanceOf(address(this)),   0 ether);
-        assertEq(gem("gold", address(this)),   960 ether);
-        vat.mint(address(this), 100 ether);  // magic up some dai for bidding
-        flip.dent(auction, 38 ether,  rad(100 ether));
-        assertEq(vat.balanceOf(address(this)), 100 ether);
-        assertEq(gem("gold", address(this)),   962 ether);
-        assertEq(gem("gold", address(this)),   962 ether);
-        assertEq(vow.sin(now),     rad(100 ether));
+        assertEq(CDPEngine.balanceOf(address(this)),   0 ether);
+        assertEq(tokenCollateral("gold", address(this)),   960 ether);
+        CDPEngine.mint(address(this), 100 ether);  // magic up some dai for bidding
+        liquidator.dent(auction, 38 ether,  rad(100 ether));
+        assertEq(CDPEngine.balanceOf(address(this)), 100 ether);
+        assertEq(tokenCollateral("gold", address(this)),   962 ether);
+        assertEq(tokenCollateral("gold", address(this)),   962 ether);
+        assertEq(debtEngine.sin(now),     rad(100 ether));
 
         hevm.warp(now + 4 hours);
-        flip.deal(auction);
-        assertEq(vat.balanceOf(address(vow)),  100 ether);
+        liquidator.deal(auction);
+        assertEq(CDPEngine.balanceOf(address(debtEngine)),  100 ether);
     }
 
     function test_floppy_bite() public {
-        vat.file("gold", 'spot', ray(2.5 ether));
-        vat.frob("gold", me, me, me, 40 ether, 100 ether);
-        vat.file("gold", 'spot', ray(2 ether));  // now unsafe
+        CDPEngine.file("gold", 'spot', ray(2.5 ether));
+        CDPEngine.frob("gold", me, me, me, 40 ether, 100 ether);
+        CDPEngine.file("gold", 'spot', ray(2 ether));  // now unsafe
 
-        cat.file("gold", "lump", 100 ether);  // => bite everything
-        assertEq(vow.sin(now), rad(  0 ether));
-        cat.bite("gold", address(this));
-        assertEq(vow.sin(now), rad(100 ether));
+        cat.file("gold", "liquidatorAmount", 100 ether);  // => CDPLiquidation everything
+        assertEq(debtEngine.sin(now), rad(  0 ether));
+        cat.CDPLiquidation("gold", address(this));
+        assertEq(debtEngine.sin(now), rad(100 ether));
 
-        assertEq(vow.Sin(), rad(100 ether));
-        vow.flog(now);
-        assertEq(vow.Sin(), rad(  0 ether));
-        assertEq(vow.Woe(), rad(100 ether));
-        assertEq(vow.Joy(), rad(  0 ether));
-        assertEq(vow.Ash(), rad(  0 ether));
+        assertEq(debtEngine.Sin(), rad(100 ether));
+        debtEngine.flog(now);
+        assertEq(debtEngine.Sin(), rad(  0 ether));
+        assertEq(debtEngine.Woe(), rad(100 ether));
+        assertEq(debtEngine.Joy(), rad(  0 ether));
+        assertEq(debtEngine.Ash(), rad(  0 ether));
 
-        vow.file("sump", rad(10 ether));
-        vow.file("dump", 2000 ether);
-        uint f1 = vow.flop();
-        assertEq(vow.Woe(),  rad(90 ether));
-        assertEq(vow.Joy(),  rad( 0 ether));
-        assertEq(vow.Ash(),  rad(10 ether));
+        debtEngine.file("sump", rad(10 ether));
+        debtEngine.file("dump", 2000 ether);
+        uint f1 = debtEngine.flop();
+        assertEq(debtEngine.Woe(),  rad(90 ether));
+        assertEq(debtEngine.Joy(),  rad( 0 ether));
+        assertEq(debtEngine.Ash(),  rad(10 ether));
         flop.dent(f1, 1000 ether, rad(10 ether));
-        assertEq(vow.Woe(),  rad(90 ether));
-        assertEq(vow.Joy(),  rad(10 ether));
-        assertEq(vow.Ash(),  rad(10 ether));
+        assertEq(debtEngine.Woe(),  rad(90 ether));
+        assertEq(debtEngine.Joy(),  rad(10 ether));
+        assertEq(debtEngine.Ash(),  rad(10 ether));
 
         assertEq(gov.balanceOf(address(this)),  100 ether);
         hevm.warp(now + 4 hours);
@@ -671,58 +671,58 @@ contract BiteTest is DSTest {
 
     function test_flappy_bite() public {
         // get some surplus
-        vat.mint(address(vow), 100 ether);
-        assertEq(vat.balanceOf(address(vow)),  100 ether);
+        CDPEngine.mint(address(debtEngine), 100 ether);
+        assertEq(CDPEngine.balanceOf(address(debtEngine)),  100 ether);
         assertEq(gov.balanceOf(address(this)), 100 ether);
 
-        vow.file("bump", rad(100 ether));
-        assertEq(vow.Awe(), 0 ether);
-        uint id = vow.flap();
+        debtEngine.file("bump", rad(100 ether));
+        assertEq(debtEngine.Awe(), 0 ether);
+        uint id = debtEngine.buyCollateral();
 
-        assertEq(vat.balanceOf(address(this)),   0 ether);
+        assertEq(CDPEngine.balanceOf(address(this)),   0 ether);
         assertEq(gov.balanceOf(address(this)), 100 ether);
-        flap.tend(id, rad(100 ether), 10 ether);
+        buyCollateral.tend(id, rad(100 ether), 10 ether);
         hevm.warp(now + 4 hours);
-        gov.setOwner(address(flap));
-        flap.deal(id);
-        assertEq(vat.balanceOf(address(this)),   100 ether);
+        gov.setOwner(address(buyCollateral));
+        buyCollateral.deal(id);
+        assertEq(CDPEngine.balanceOf(address(this)),   100 ether);
         assertEq(gov.balanceOf(address(this)),    90 ether);
     }
 }
 
 contract FoldTest is DSTest {
-    Vat vat;
+    CDPEngineInstance CDPEngine;
 
-    function ray(uint wad) internal pure returns (uint) {
-        return wad * 10 ** 9;
+    function ray(uint amount) internal pure returns (uint) {
+        return amount * 10 ** 9;
     }
-    function rad(uint wad) internal pure returns (uint) {
-        return wad * 10 ** 27;
+    function rad(uint amount) internal pure returns (uint) {
+        return amount * 10 ** 27;
     }
     function tab(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = vat.urns(ilk, urn); ink_;
-        (uint Art_, uint rate, uint spot, uint line, uint dust) = vat.ilks(ilk);
+        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); ink_;
+        (uint Art_, uint accumulatedRates , uint spot, uint line, uint dust) = CDPEngine.ilks(ilk);
         Art_; spot; line; dust;
-        return art_ * rate;
+        return art_ * accumulatedRates ;
     }
     function jam(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = vat.urns(ilk, urn); art_;
+        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); art_;
         return ink_;
     }
 
     function setUp() public {
-        vat = new Vat();
-        vat.init("gold");
-        vat.file("Line", rad(100 ether));
-        vat.file("gold", "line", rad(100 ether));
+        CDPEngine = new CDPEngineInstance();
+        CDPEngine.init("gold");
+        CDPEngine.file("Line", rad(100 ether));
+        CDPEngine.file("gold", "line", rad(100 ether));
     }
     function draw(bytes32 ilk, uint dai) internal {
-        vat.file("Line", rad(dai));
-        vat.file(ilk, "line", rad(dai));
-        vat.file(ilk, "spot", 10 ** 27 * 10000 ether);
+        CDPEngine.file("Line", rad(dai));
+        CDPEngine.file(ilk, "line", rad(dai));
+        CDPEngine.file(ilk, "spot", 10 ** 27 * 10000 ether);
         address self = address(this);
-        vat.slip(ilk, self,  10 ** 27 * 1 ether);
-        vat.frob(ilk, self, self, self, int(1 ether), int(dai));
+        CDPEngine.slip(ilk, self,  10 ** 27 * 1 ether);
+        CDPEngine.frob(ilk, self, self, self, int(1 ether), int(dai));
     }
     function test_fold() public {
         address self = address(this);
@@ -730,8 +730,8 @@ contract FoldTest is DSTest {
         draw("gold", 1 ether);
 
         assertEq(tab("gold", self), rad(1.00 ether));
-        vat.fold("gold", ali,   int(ray(0.05 ether)));
+        CDPEngine.fold("gold", ali,   int(ray(0.05 ether)));
         assertEq(tab("gold", self), rad(1.05 ether));
-        assertEq(vat.dai(ali),      rad(0.05 ether));
+        assertEq(CDPEngine.dai(ali),      rad(0.05 ether));
     }
 }
