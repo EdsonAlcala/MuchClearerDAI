@@ -39,29 +39,50 @@ contract Jug is LogEmitter {
 
     // --- Math ---
     function rpow(uint x, uint n, uint b) internal pure returns (uint z) {
-      assembly {
-        switch x case 0 {switch n case 0 {z := b} default {z := 0}}
-        default {
-          switch mod(n, 2) case 0 { z := b } default { z := x }
-          let half := div(b, 2)  // for rounding.
-          for { n := div(n, 2) } n { n := div(n,2) } {
-            let xx := mul(x, x)
-            if iszero(eq(div(xx, x), x)) { revert(0,0) }
-            let xxRound := add(xx, half)
-            if lt(xxRound, xx) { revert(0,0) }
-            x := div(xxRound, b)
-            if mod(n,2) {
-              let zx := mul(z, x)
-              if and(iszero(iszero(x)), iszero(eq(div(zx, x), z))) { revert(0,0) }
-              let zxRound := add(zx, half)
-              if lt(zxRound, zx) { revert(0,0) }
-              z := div(zxRound, b)
+        assembly {
+            switch x 
+            case 0 {
+                switch n 
+                case 0 {z := b}   // if x, n == 0, return b 
+                default {z := 0}  // if x == 0, n != 0, return 0
             }
-          }
+            default {
+                switch mod(n, 2) 
+                case 0 { z := b }   //if n is even, set z = b
+                default { z := x }    // otherwise set z = x
+
+                let halfOfB := div(b, 2)   // for rounding. 
+
+                for { n := div(n, 2) } n { n := div(n,2) }  //n starts at n/2 (floored)
+                                                            //loop runs if n != 0
+                                                            //n is divided by 2 after loop iteration
+                {
+                    let xSqrd := mul(x, x)   //x squared
+                    if iszero(eq(div(xSqrd, x), x))   //multiplication overflow check. If xSqrd/x != x, revert
+                    { revert(0,0) }
+                    let xSqrdRound := add(xSqrd, halfOfB) 
+                    if lt(xSqrdRound, xSqrd)  //addition overfow check. revert if xSqrdRound < xSqrd
+                    { revert(0,0) }
+                    x := div(xSqrdRound, b) // x = (xSqrd + b/2)/b
+                                            // note that the addition of halfOfB before dividing will help to round the result in the proper direction. 
+                                            // we're obtaining the result of xSqrd/b, but with rounding to the nearest whole num
+                    if mod(n,2) {   // if n is odd
+                        let zx := mul(z, x)   
+                        if and(iszero(iszero(x)), iszero(eq(div(zx, x), z)))    //mul overflow check. 
+                                                                                //if x!=0, and zx/x != z, then revert
+                        { revert(0,0) }
+                        let zxRound := add(zx, halfOfB)
+                        if lt(zxRound, zx)  //addition overflow, reverts if zxRound < zx
+                        { revert(0,0) }
+                        z := div(zxRound, b)  //z = z*x/b (rounded to nearest whole num)
+                    }
+                } // at end of loop, n = n/2 (floored)
+            }
         }
-      }
     }
+    
     uint256 constant ONE = 10 ** 27;
+    
     function add(uint x, uint y) internal pure returns (uint z) {
         z = x + y;
         require(z >= x);
