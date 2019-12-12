@@ -117,7 +117,7 @@ contract CollateralBuyerContract is LogEmitter, Permissioned {
         require(bids[id].expiryTime > now || bids[id].expiryTime == 0, "CollateralBuyerContract/already-finished-expiryTime");
         require(bids[id].bidEndTime > now, "CollateralBuyerContract/already-finished-bidEndTime");
 
-        require(daiForSale == bids[id].daiForSale, "CollateralBuyerContract/daiForSale-not-matrateAccumulatorng");
+        require(daiForSale == bids[id].daiForSale, "CollateralBuyerContract/daiForSale-not-matching");
         require(bid >  bids[id].bid, "CollateralBuyerContract/bid-not-higher");
         require(mul(bid, ONE) >= mul(minimumBidIncrease, bids[id].bid), "CollateralBuyerContract/insufficient-increase");
 

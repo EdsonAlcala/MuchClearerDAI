@@ -106,7 +106,7 @@ contract DSRTest is DSTest {
         assertEq(amount(CDPEngine.dai(self)), 110.25 ether);
         assertEq(pot.totalSavingsRate(),            0.00 ether);
     }
-    function test_fresh_rateAccumulator() public {
+    function test_fresh_chi() public {
         uint timeOfLastCollectionRate = pot.timeOfLastCollectionRate();
         assertEq(timeOfLastCollectionRate, now);
         hevm.warp(now + 1 days);
@@ -118,7 +118,7 @@ contract DSRTest is DSTest {
         // if we disableDSR in the same transaction we should not earn DSR
         assertEq(amount(CDPEngine.dai(self)), 100 ether);
     }
-    function testFail_stale_rateAccumulator() public {
+    function testFail_stale_chi() public {
         pot.file("daiSavingsRate", uint(1000000564701133626865910626));  // 5% / day
         pot.collectRate();
         hevm.warp(now + 1 days);
