@@ -45,11 +45,11 @@ contract Usr {
         CDPEngine  = CDPEngine_;
         end  = end_;
     }
-    function frob(bytes32 ilk, address u, address v, address w, int dink, int dart) public {
-        CDPEngine.frob(ilk, u, v, w, dink, dart);
+    function frob(bytes32 collateralType, address u, address v, address w, int dink, int dart) public {
+        CDPEngine.frob(collateralType, u, v, w, dink, dart);
     }
-    function flux(bytes32 ilk, address src, address dst, uint256 amount) public {
-        CDPEngine.flux(ilk, src, dst, amount);
+    function flux(bytes32 collateralType, address src, address dst, uint256 amount) public {
+        CDPEngine.flux(collateralType, src, dst, amount);
     }
     function move(address src, address dst, uint256 rad) public {
         CDPEngine.move(src, dst, rad);
@@ -60,14 +60,14 @@ contract Usr {
     function disableDSR(TokenAdapter gemA, address usr, uint amount) public {
         gemA.disableDSR(usr, amount);
     }
-    function free(bytes32 ilk) public {
-        end.free(ilk);
+    function free(bytes32 collateralType) public {
+        end.free(collateralType);
     }
     function pack(uint256 rad) public {
         end.pack(rad);
     }
-    function cash(bytes32 ilk, uint amount) public {
-        end.cash(ilk, amount);
+    function cash(bytes32 collateralType, uint amount) public {
+        end.cash(collateralType, amount);
     }
 }
 
@@ -82,14 +82,14 @@ contract EndTest is DSTest {
 
     Spotter spot;
 
-    struct Ilk {
+    struct CollateralType {
         DSValue pip;
         DSToken tokenCollateral;
         TokenAdapter gemA;
         CollateralSellerContract liquidator;
     }
 
-    mapping (bytes32 => Ilk) ilks;
+    mapping (bytes32 => CollateralType) collateralTypes;
 
     CollateralBuyerContract buyCollateral;
     Flopper flop;
@@ -114,24 +114,24 @@ contract EndTest is DSTest {
     function dai(address urn) internal view returns (uint) {
         return CDPEngine.dai(urn) / RAY;
     }
-    function tokenCollateral(bytes32 ilk, address urn) internal view returns (uint) {
-        return CDPEngine.tokenCollateral(ilk, urn);
+    function tokenCollateral(bytes32 collateralType, address urn) internal view returns (uint) {
+        return CDPEngine.tokenCollateral(collateralType, urn);
     }
-    function ink(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); art_;
+    function ink(bytes32 collateralType, address urn) internal view returns (uint) {
+        (uint ink_, uint art_) = CDPEngine.urns(collateralType, urn); art_;
         return ink_;
     }
-    function art(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); ink_;
+    function art(bytes32 collateralType, address urn) internal view returns (uint) {
+        (uint ink_, uint art_) = CDPEngine.urns(collateralType, urn); ink_;
         return art_;
     }
-    function debtAmount(bytes32 ilk) internal view returns (uint) {
-        (uint Art_, uint rate_, uint spot_, uint line_, uint dust_) = CDPEngine.ilks(ilk);
+    function debtAmount(bytes32 collateralType) internal view returns (uint) {
+        (uint Art_, uint rate_, uint spot_, uint line_, uint dust_) = CDPEngine.collateralTypes(collateralType);
         rate_; spot_; line_; dust_;
         return Art_;
     }
-    function balanceOf(bytes32 ilk, address usr) internal view returns (uint) {
-        return ilks[ilk].tokenCollateral.balanceOf(usr);
+    function balanceOf(bytes32 collateralType, address usr) internal view returns (uint) {
+        return collateralTypes[collateralType].tokenCollateral.balanceOf(usr);
     }
 
     function try_pot_file(bytes32 what, uint data) public returns(bool ok) {
@@ -139,7 +139,7 @@ contract EndTest is DSTest {
         (ok,) = address(pot).call(abi.encodeWithSignature(sig, what, data));
     }
 
-    function init_collateral(bytes32 name) internal returns (Ilk memory) {
+    function init_collateral(bytes32 name) internal returns (CollateralType memory) {
         DSToken coin = new DSToken(name);
         coin.mint(20 ether);
 
@@ -169,12 +169,12 @@ contract EndTest is DSTest {
         cat.file(name, "liquidatorPenalty", ray(1 ether));
         cat.file(name, "liquidatorAmount", rad(15 ether));
 
-        ilks[name].pip = pip;
-        ilks[name].tokenCollateral = coin;
-        ilks[name].gemA = gemA;
-        ilks[name].liquidator = liquidator;
+        collateralTypes[name].pip = pip;
+        collateralTypes[name].tokenCollateral = coin;
+        collateralTypes[name].gemA = gemA;
+        collateralTypes[name].liquidator = liquidator;
 
-        return ilks[name];
+        return collateralTypes[name];
     }
 
     function setUp() public {
@@ -250,7 +250,7 @@ contract EndTest is DSTest {
     // -- Scenario where there is one over-collateralised CDP
     // -- and there is no Vow deficit or surplus
     function test_cage_collateralised() public {
-        Ilk memory gold = init_collateral("gold");
+        CollateralType memory gold = init_collateral("gold");
 
         Usr ali = new Usr(CDPEngine, end);
 
@@ -313,7 +313,7 @@ contract EndTest is DSTest {
     // -- Scenario where there is one over-collateralised and one
     // -- under-collateralised CDP, and no Vow deficit or surplus
     function test_cage_undercollateralised() public {
-        Ilk memory gold = init_collateral("gold");
+        CollateralType memory gold = init_collateral("gold");
 
         Usr ali = new Usr(CDPEngine, end);
         Usr bob = new Usr(CDPEngine, end);
@@ -404,7 +404,7 @@ contract EndTest is DSTest {
     // -- Scenario where there is one collateralised CDP
     // -- undergoing auction at the time of cage
     function test_cage_skip() public {
-        Ilk memory gold = init_collateral("gold");
+        CollateralType memory gold = init_collateral("gold");
 
         Usr ali = new Usr(CDPEngine, end);
 
@@ -480,7 +480,7 @@ contract EndTest is DSTest {
     // -- Scenario where there is one over-collateralised CDP
     // -- and there is a deficit in the Vow
     function test_cage_collateralised_deficit() public {
-        Ilk memory gold = init_collateral("gold");
+        CollateralType memory gold = init_collateral("gold");
 
         Usr ali = new Usr(CDPEngine, end);
 
@@ -546,7 +546,7 @@ contract EndTest is DSTest {
     // -- and one under-collateralised CDP and there is a
     // -- surplus in the Vow
     function test_cage_undercollateralised_surplus() public {
-        Ilk memory gold = init_collateral("gold");
+        CollateralType memory gold = init_collateral("gold");
 
         Usr ali = new Usr(CDPEngine, end);
         Usr bob = new Usr(CDPEngine, end);
@@ -642,8 +642,8 @@ contract EndTest is DSTest {
     // -- under-collateralised CDP of different collateral types
     // -- and no Vow deficit or surplus
     function test_cage_net_undercollateralised_multiple_ilks() public {
-        Ilk memory gold = init_collateral("gold");
-        Ilk memory coal = init_collateral("coal");
+        CollateralType memory gold = init_collateral("gold");
+        CollateralType memory coal = init_collateral("coal");
 
         Usr ali = new Usr(CDPEngine, end);
         Usr bob = new Usr(CDPEngine, end);

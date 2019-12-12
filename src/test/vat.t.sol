@@ -6,7 +6,7 @@ import "ds-token/token.sol";
 import {CDPEngineInstance} from '../CDPEngine.sol';
 import {Cat} from '../cat.sol';
 import {Vow} from '../debtEngine.sol';
-import {Jug} from '../jug.sol';
+import {StabilityFees} from '../stabilityFees.sol';
 import {TokenAdapter, ETHAdapter, DAItoTokenAdapter} from '../enableDSR.sol';
 
 import {CollateralSellerContract} from './liquidator.t.sol';
@@ -61,9 +61,9 @@ contract Usr {
             revert(free, 32)
         }
     }
-    function can_frob(bytes32 ilk, address u, address v, address w, int dink, int dart) public returns (bool) {
+    function can_frob(bytes32 collateralType, address u, address v, address w, int dink, int dart) public returns (bool) {
         string memory sig = "frob(bytes32,address,address,address,int256,int256)";
-        bytes memory data = abi.encodeWithSignature(sig, ilk, u, v, w, dink, dart);
+        bytes memory data = abi.encodeWithSignature(sig, collateralType, u, v, w, dink, dart);
 
         bytes memory can_call = abi.encodeWithSignature("try_call(address,bytes)", CDPEngine, data);
         (bool ok, bytes memory success) = address(this).call(can_call);
@@ -71,9 +71,9 @@ contract Usr {
         ok = abi.decode(success, (bool));
         if (ok) return true;
     }
-    function can_fork(bytes32 ilk, address src, address dst, int dink, int dart) public returns (bool) {
+    function can_fork(bytes32 collateralType, address src, address dst, int dink, int dart) public returns (bool) {
         string memory sig = "fork(bytes32,address,address,int256,int256)";
-        bytes memory data = abi.encodeWithSignature(sig, ilk, src, dst, dink, dart);
+        bytes memory data = abi.encodeWithSignature(sig, collateralType, src, dst, dink, dart);
 
         bytes memory can_call = abi.encodeWithSignature("try_call(address,bytes)", CDPEngine, data);
         (bool ok, bytes memory success) = address(this).call(can_call);
@@ -81,11 +81,11 @@ contract Usr {
         ok = abi.decode(success, (bool));
         if (ok) return true;
     }
-    function frob(bytes32 ilk, address u, address v, address w, int dink, int dart) public {
-        CDPEngine.frob(ilk, u, v, w, dink, dart);
+    function frob(bytes32 collateralType, address u, address v, address w, int dink, int dart) public {
+        CDPEngine.frob(collateralType, u, v, w, dink, dart);
     }
-    function fork(bytes32 ilk, address src, address dst, int dink, int dart) public {
-        CDPEngine.fork(ilk, src, dst, dink, dart);
+    function fork(bytes32 collateralType, address src, address dst, int dink, int dart) public {
+        CDPEngine.fork(collateralType, src, dst, dink, dart);
     }
     function hope(address usr) public {
         CDPEngine.hope(usr);
@@ -96,15 +96,15 @@ contract Usr {
 contract FrobTest is DSTest {
     TestVat CDPEngine;
     DSToken gold;
-    Jug     jug;
+    StabilityFees     stabilityFees;
 
     TokenAdapter gemA;
     address me;
 
-    function try_frob(bytes32 ilk, int ink, int art) public returns (bool ok) {
+    function try_frob(bytes32 collateralType, int ink, int art) public returns (bool ok) {
         string memory sig = "frob(bytes32,address,address,address,int256,int256)";
         address self = address(this);
-        (ok,) = address(CDPEngine).call(abi.encodeWithSignature(sig, ilk, self, self, self, ink, art));
+        (ok,) = address(CDPEngine).call(abi.encodeWithSignature(sig, collateralType, self, self, self, ink, art));
     }
 
     function ray(uint amount) internal pure returns (uint) {
@@ -123,9 +123,9 @@ contract FrobTest is DSTest {
         CDPEngine.file("gold", "spot",    ray(1 ether));
         CDPEngine.file("gold", "line", rad(1000 ether));
         CDPEngine.file("Line",         rad(1000 ether));
-        jug = new Jug(address(CDPEngine));
-        jug.init("gold");
-        CDPEngine.addAuthorization(address(jug));
+        stabilityFees = new StabilityFees(address(CDPEngine));
+        stabilityFees.init("gold");
+        CDPEngine.addAuthorization(address(stabilityFees));
 
         gold.approve(address(gemA));
         gold.approve(address(CDPEngine));
@@ -138,15 +138,15 @@ contract FrobTest is DSTest {
         me = address(this);
     }
 
-    function tokenCollateral(bytes32 ilk, address urn) internal view returns (uint) {
-        return CDPEngine.tokenCollateral(ilk, urn);
+    function tokenCollateral(bytes32 collateralType, address urn) internal view returns (uint) {
+        return CDPEngine.tokenCollateral(collateralType, urn);
     }
-    function ink(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); art_;
+    function ink(bytes32 collateralType, address urn) internal view returns (uint) {
+        (uint ink_, uint art_) = CDPEngine.urns(collateralType, urn); art_;
         return ink_;
     }
-    function art(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); ink_;
+    function art(bytes32 collateralType, address urn) internal view returns (uint) {
+        (uint ink_, uint art_) = CDPEngine.urns(collateralType, urn); ink_;
         return art_;
     }
 
@@ -461,7 +461,7 @@ contract BiteTest is DSTest {
     TestVow debtEngine;
     Cat     cat;
     DSToken gold;
-    Jug     jug;
+    StabilityFees     stabilityFees;
 
     TokenAdapter gemA;
 
@@ -473,10 +473,10 @@ contract BiteTest is DSTest {
 
     address me;
 
-    function try_frob(bytes32 ilk, int ink, int art) public returns (bool ok) {
+    function try_frob(bytes32 collateralType, int ink, int art) public returns (bool ok) {
         string memory sig = "frob(bytes32,address,address,address,int256,int256)";
         address self = address(this);
-        (ok,) = address(CDPEngine).call(abi.encodeWithSignature(sig, ilk, self, self, self, ink, art));
+        (ok,) = address(CDPEngine).call(abi.encodeWithSignature(sig, collateralType, self, self, self, ink, art));
     }
 
     function ray(uint amount) internal pure returns (uint) {
@@ -486,15 +486,15 @@ contract BiteTest is DSTest {
         return amount * 10 ** 27;
     }
 
-    function tokenCollateral(bytes32 ilk, address urn) internal view returns (uint) {
-        return CDPEngine.tokenCollateral(ilk, urn);
+    function tokenCollateral(bytes32 collateralType, address urn) internal view returns (uint) {
+        return CDPEngine.tokenCollateral(collateralType, urn);
     }
-    function ink(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); art_;
+    function ink(bytes32 collateralType, address urn) internal view returns (uint) {
+        (uint ink_, uint art_) = CDPEngine.urns(collateralType, urn); art_;
         return ink_;
     }
-    function art(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); ink_;
+    function art(bytes32 collateralType, address urn) internal view returns (uint) {
+        (uint ink_, uint art_) = CDPEngine.urns(collateralType, urn); ink_;
         return art_;
     }
 
@@ -515,10 +515,10 @@ contract BiteTest is DSTest {
         buyCollateral.addAuthorization(address(debtEngine));
         flop.addAuthorization(address(debtEngine));
 
-        jug = new Jug(address(CDPEngine));
-        jug.init("gold");
-        jug.file("debtEngine", address(debtEngine));
-        CDPEngine.addAuthorization(address(jug));
+        stabilityFees = new StabilityFees(address(CDPEngine));
+        stabilityFees.init("gold");
+        stabilityFees.file("debtEngine", address(debtEngine));
+        CDPEngine.addAuthorization(address(stabilityFees));
 
         cat = new Cat(address(CDPEngine));
         cat.file("debtEngine", address(debtEngine));
@@ -699,14 +699,14 @@ contract FoldTest is DSTest {
     function rad(uint amount) internal pure returns (uint) {
         return amount * 10 ** 27;
     }
-    function tab(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); ink_;
-        (uint Art_, uint accumulatedRates , uint spot, uint line, uint dust) = CDPEngine.ilks(ilk);
+    function tab(bytes32 collateralType, address urn) internal view returns (uint) {
+        (uint ink_, uint art_) = CDPEngine.urns(collateralType, urn); ink_;
+        (uint Art_, uint accumulatedRates , uint spot, uint line, uint dust) = CDPEngine.collateralTypes(collateralType);
         Art_; spot; line; dust;
         return art_ * accumulatedRates ;
     }
-    function jam(bytes32 ilk, address urn) internal view returns (uint) {
-        (uint ink_, uint art_) = CDPEngine.urns(ilk, urn); art_;
+    function jam(bytes32 collateralType, address urn) internal view returns (uint) {
+        (uint ink_, uint art_) = CDPEngine.urns(collateralType, urn); art_;
         return ink_;
     }
 
@@ -716,13 +716,13 @@ contract FoldTest is DSTest {
         CDPEngine.file("Line", rad(100 ether));
         CDPEngine.file("gold", "line", rad(100 ether));
     }
-    function draw(bytes32 ilk, uint dai) internal {
+    function draw(bytes32 collateralType, uint dai) internal {
         CDPEngine.file("Line", rad(dai));
-        CDPEngine.file(ilk, "line", rad(dai));
-        CDPEngine.file(ilk, "spot", 10 ** 27 * 10000 ether);
+        CDPEngine.file(collateralType, "line", rad(dai));
+        CDPEngine.file(collateralType, "spot", 10 ** 27 * 10000 ether);
         address self = address(this);
-        CDPEngine.slip(ilk, self,  10 ** 27 * 1 ether);
-        CDPEngine.frob(ilk, self, self, self, int(1 ether), int(dai));
+        CDPEngine.slip(collateralType, self,  10 ** 27 * 1 ether);
+        CDPEngine.frob(collateralType, self, self, self, int(1 ether), int(dai));
     }
     function test_fold() public {
         address self = address(this);

@@ -69,12 +69,12 @@ contract Vat_ is CDPEngineInstance {
     function dai_balance(address usr) public view returns (uint) {
         return dai[usr];
     }
-    bytes32 ilk;
+    bytes32 collateralType;
     function set_ilk(bytes32 ilk_) public {
-        ilk = ilk_;
+        collateralType = ilk_;
     }
     function gem_balance(address usr) public view returns (uint) {
-        return tokenCollateral[ilk][usr];
+        return tokenCollateral[collateralType][usr];
     }
 }
 

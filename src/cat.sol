@@ -25,7 +25,7 @@ contract Kicker {
 }
 
 contract CDPEngineContract {
-    function ilks(bytes32) external view returns (
+    function collateralTypes(bytes32) external view returns (
         uint256 debtAmount,   // amount
         uint256 accumulatedRates ,  // ray
         uint256 spot   // ray
@@ -46,13 +46,13 @@ contract VowLike {
 contract Cat is LogEmitter, Permissioned {
 
     // --- Data ---
-    struct Ilk {
+    struct CollateralType {
         address liquidator;  // Liquidator
         uint256 liquidatorPenalty;  // Liquidation Penalty   [ray]
         uint256 liquidatorAmount;  // Liquidation Quantity  [amount]
     }
 
-    mapping (bytes32 => Ilk) public ilks;
+    mapping (bytes32 => CollateralType) public collateralTypes;
 
     bool public DSRisActive;
     CDPEngineContract public CDPEngine;
@@ -60,7 +60,7 @@ contract Cat is LogEmitter, Permissioned {
 
     // --- Events ---
     event CDPLiquidationEvent(
-      bytes32 indexed ilk,
+      bytes32 indexed collateralType,
       address indexed urn,
       uint256 ink,
       uint256 art,
@@ -94,43 +94,43 @@ contract Cat is LogEmitter, Permissioned {
         if (what == "debtEngine") debtEngine = VowLike(data);
         else revert("Cat/file-unrecognized-param");
     }
-    function file(bytes32 ilk, bytes32 what, uint data) external emitLog onlyOwners {
-        if (what == "liquidatorPenalty") ilks[ilk].liquidatorPenalty = data;
-        else if (what == "liquidatorAmount") ilks[ilk].liquidatorAmount = data;
+    function file(bytes32 collateralType, bytes32 what, uint data) external emitLog onlyOwners {
+        if (what == "liquidatorPenalty") collateralTypes[collateralType].liquidatorPenalty = data;
+        else if (what == "liquidatorAmount") collateralTypes[collateralType].liquidatorAmount = data;
         else revert("Cat/file-unrecognized-param");
     }
-    function file(bytes32 ilk, bytes32 what, address liquidator) external emitLog onlyOwners {
+    function file(bytes32 collateralType, bytes32 what, address liquidator) external emitLog onlyOwners {
         if (what == "liquidator") {
-            CDPEngine.nope(ilks[ilk].liquidator);
-            ilks[ilk].liquidator = liquidator;
+            CDPEngine.nope(collateralTypes[collateralType].liquidator);
+            collateralTypes[collateralType].liquidator = liquidator;
             CDPEngine.hope(liquidator);
         }
         else revert("Cat/file-unrecognized-param");
     }
 
     // --- CDP Liquidation ---
-    function CDPLiquidation(bytes32 ilk, address urn) external returns (uint id) {
-        (, uint accumulatedRates , uint spot) = CDPEngine.ilks(ilk);
-        (uint ink, uint art) = CDPEngine.urns(ilk, urn);
+    function CDPLiquidation(bytes32 collateralType, address urn) external returns (uint id) {
+        (, uint accumulatedRates , uint spot) = CDPEngine.collateralTypes(collateralType);
+        (uint ink, uint art) = CDPEngine.urns(collateralType, urn);
 
         require(DSRisActive, "Cat/not-DSRisActive");
         require(spot > 0 && mul(ink, spot) < mul(art, accumulatedRates ), "Cat/not-unsafe");
 
-        uint tokensForSale = min(ink, ilks[ilk].liquidatorAmount);
+        uint tokensForSale = min(ink, collateralTypes[collateralType].liquidatorAmount);
         art      = min(art, mul(tokensForSale, art) / ink);
 
         require(tokensForSale <= 2**255 && art <= 2**255, "Cat/overflow");
-        CDPEngine.grab(ilk, urn, address(this), address(debtEngine), -int(tokensForSale), -int(art));
+        CDPEngine.grab(collateralType, urn, address(this), address(debtEngine), -int(tokensForSale), -int(art));
 
         debtEngine.fess(mul(art, accumulatedRates ));
-        id = Kicker(ilks[ilk].liquidator).kick({ urn: urn
+        id = Kicker(collateralTypes[collateralType].liquidator).kick({ urn: urn
                                          , daiIncomeReceiver: address(debtEngine)
-                                         , tab: rmul(mul(art, accumulatedRates ), ilks[ilk].liquidatorPenalty)
+                                         , tab: rmul(mul(art, accumulatedRates ), collateralTypes[collateralType].liquidatorPenalty)
                                          , tokensForSale: tokensForSale
                                          , bid: 0
                                          });
 
-        emit CDPLiquidationEvent(ilk, urn, tokensForSale, art, mul(art, accumulatedRates ), ilks[ilk].liquidator, id);
+        emit CDPLiquidationEvent(collateralType, urn, tokensForSale, art, mul(art, accumulatedRates ), collateralTypes[collateralType].liquidator, id);
     }
 
     function cage() external emitLog onlyOwners {

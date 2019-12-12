@@ -36,7 +36,7 @@ contract CDPEngineInstance is Permissioned {
     }
 
     // --- Data ---
-    struct Ilk {
+    struct CollateralType {
         uint256 debtAmount;   // Total Normalised Debt     [amount]
         uint256 accumulatedRates ;  // Accumulated Rates         [ray]
         uint256 spot;  // Price with Safety Margin  [ray]
@@ -48,7 +48,7 @@ contract CDPEngineInstance is Permissioned {
         uint256 art;   // Normalised Debt    [amount]
     }
 
-    mapping (bytes32 => Ilk)                       public ilks;
+    mapping (bytes32 => CollateralType)                       public collateralTypes;
     mapping (bytes32 => mapping (address => Urn )) public urns;
     mapping (bytes32 => mapping (address => uint)) public tokenCollateral;  // [amount]
     mapping (address => uint256)                   public dai;  // [rad]
@@ -120,20 +120,20 @@ contract CDPEngineInstance is Permissioned {
     }
 
     // --- Administration ---
-    function init(bytes32 ilk) external emitLog onlyOwners {
-        require(ilks[ilk].accumulatedRates  == 0, "CDPEngineInstance/ilk-already-init");
-        ilks[ilk].accumulatedRates  = 10 ** 27;
+    function init(bytes32 collateralType) external emitLog onlyOwners {
+        require(collateralTypes[collateralType].accumulatedRates  == 0, "CDPEngineInstance/collateralType-already-init");
+        collateralTypes[collateralType].accumulatedRates  = 10 ** 27;
     }
     function file(bytes32 what, uint data) external emitLog onlyOwners {
         require(DSRisActive, "CDPEngineInstance/not-DSRisActive");
         if (what == "Line") Line = data;
         else revert("CDPEngineInstance/file-unrecognized-param");
     }
-    function file(bytes32 ilk, bytes32 what, uint data) external emitLog onlyOwners {
+    function file(bytes32 collateralType, bytes32 what, uint data) external emitLog onlyOwners {
         require(DSRisActive, "CDPEngineInstance/not-DSRisActive");
-        if (what == "spot") ilks[ilk].spot = data;
-        else if (what == "line") ilks[ilk].line = data;
-        else if (what == "dust") ilks[ilk].dust = data;
+        if (what == "spot") collateralTypes[collateralType].spot = data;
+        else if (what == "line") collateralTypes[collateralType].line = data;
+        else if (what == "dust") collateralTypes[collateralType].dust = data;
         else revert("CDPEngineInstance/file-unrecognized-param");
     }
     function cage() external emitLog onlyOwners {
@@ -141,13 +141,13 @@ contract CDPEngineInstance is Permissioned {
     }
 
     // --- Fungibility ---
-    function slip(bytes32 ilk, address usr, int256 amount) external emitLog onlyOwners {
-        tokenCollateral[ilk][usr] = add(tokenCollateral[ilk][usr], amount);
+    function slip(bytes32 collateralType, address usr, int256 amount) external emitLog onlyOwners {
+        tokenCollateral[collateralType][usr] = add(tokenCollateral[collateralType][usr], amount);
     }
-    function flux(bytes32 ilk, address src, address dst, uint256 amount) external emitLog {
+    function flux(bytes32 collateralType, address src, address dst, uint256 amount) external emitLog {
         require(wish(src, msg.sender), "CDPEngineInstance/not-allowed");
-        tokenCollateral[ilk][src] = sub(tokenCollateral[ilk][src], amount);
-        tokenCollateral[ilk][dst] = add(tokenCollateral[ilk][dst], amount);
+        tokenCollateral[collateralType][src] = sub(tokenCollateral[collateralType][src], amount);
+        tokenCollateral[collateralType][dst] = add(tokenCollateral[collateralType][dst], amount);
     }
     function move(address src, address dst, uint256 rad) external emitLog {
         require(wish(src, msg.sender), "CDPEngineInstance/not-allowed");
@@ -168,22 +168,22 @@ contract CDPEngineInstance is Permissioned {
         require(DSRisActive, "CDPEngineInstance/not-DSRisActive");
 
         Urn memory urn = urns[i][u];
-        Ilk memory ilk = ilks[i];
-        // ilk has been initialised
-        require(ilk.accumulatedRates  != 0, "CDPEngineInstance/ilk-not-init");
+        CollateralType memory collateralType = collateralTypes[i];
+        // collateralType has been initialised
+        require(collateralType.accumulatedRates  != 0, "CDPEngineInstance/collateralType-not-init");
 
         urn.ink = add(urn.ink, dink);
         urn.art = add(urn.art, dart);
-        ilk.debtAmount = add(ilk.debtAmount, dart);
+        collateralType.debtAmount = add(collateralType.debtAmount, dart);
 
-        int dtab = mul(ilk.accumulatedRates , dart);
-        uint tab = mul(ilk.accumulatedRates , urn.art);
+        int dtab = mul(collateralType.accumulatedRates , dart);
+        uint tab = mul(collateralType.accumulatedRates , urn.art);
         debt     = add(debt, dtab);
 
         // either debt has decreased, or debt ceilings are not exceeded
-        require(either(dart <= 0, both(mul(ilk.debtAmount, ilk.accumulatedRates ) <= ilk.line, debt <= Line)), "CDPEngineInstance/ceiling-exceeded");
+        require(either(dart <= 0, both(mul(collateralType.debtAmount, collateralType.accumulatedRates ) <= collateralType.line, debt <= Line)), "CDPEngineInstance/ceiling-exceeded");
         // urn is either less risky than before, or it is safe
-        require(either(both(dart <= 0, dink >= 0), tab <= mul(urn.ink, ilk.spot)), "CDPEngineInstance/not-safe");
+        require(either(both(dart <= 0, dink >= 0), tab <= mul(urn.ink, collateralType.spot)), "CDPEngineInstance/not-safe");
 
         // urn is either more safe, or the owner consents
         require(either(both(dart <= 0, dink >= 0), wish(u, msg.sender)), "CDPEngineInstance/not-allowed-u");
@@ -193,19 +193,19 @@ contract CDPEngineInstance is Permissioned {
         require(either(dart >= 0, wish(w, msg.sender)), "CDPEngineInstance/not-allowed-w");
 
         // urn has no debt, or a non-dusty amount
-        require(either(urn.art == 0, tab >= ilk.dust), "CDPEngineInstance/dust");
+        require(either(urn.art == 0, tab >= collateralType.dust), "CDPEngineInstance/dust");
 
         tokenCollateral[i][v] = sub(tokenCollateral[i][v], dink);
         dai[w]    = add(dai[w],    dtab);
 
         urns[i][u] = urn;
-        ilks[i]    = ilk;
+        collateralTypes[i]    = collateralType;
     }
     // --- CDP Fungibility ---
-    function fork(bytes32 ilk, address src, address dst, int dink, int dart) external emitLog {
-        Urn storage u = urns[ilk][src];
-        Urn storage v = urns[ilk][dst];
-        Ilk storage i = ilks[ilk];
+    function fork(bytes32 collateralType, address src, address dst, int dink, int dart) external emitLog {
+        Urn storage u = urns[collateralType][src];
+        Urn storage v = urns[collateralType][dst];
+        CollateralType storage i = collateralTypes[collateralType];
 
         u.ink = sub(u.ink, dink);
         u.art = sub(u.art, dart);
@@ -229,13 +229,13 @@ contract CDPEngineInstance is Permissioned {
     // --- CDP Confiscation ---
     function grab(bytes32 i, address u, address v, address w, int dink, int dart) external emitLog onlyOwners {
         Urn storage urn = urns[i][u];
-        Ilk storage ilk = ilks[i];
+        CollateralType storage collateralType = collateralTypes[i];
 
         urn.ink = add(urn.ink, dink);
         urn.art = add(urn.art, dart);
-        ilk.debtAmount = add(ilk.debtAmount, dart);
+        collateralType.debtAmount = add(collateralType.debtAmount, dart);
 
-        int dtab = mul(ilk.accumulatedRates , dart);
+        int dtab = mul(collateralType.accumulatedRates , dart);
 
         tokenCollateral[i][v] = sub(tokenCollateral[i][v], dink);
         sin[w]    = sub(sin[w],    dtab);
@@ -260,9 +260,9 @@ contract CDPEngineInstance is Permissioned {
     // --- Rates ---
     function fold(bytes32 i, address u, int accumulatedRates ) external emitLog onlyOwners {
         require(DSRisActive, "CDPEngineInstance/not-DSRisActive");
-        Ilk storage ilk = ilks[i];
-        ilk.accumulatedRates  = add(ilk.accumulatedRates , accumulatedRates );
-        int rad  = mul(ilk.debtAmount, accumulatedRates );
+        CollateralType storage collateralType = collateralTypes[i];
+        collateralType.accumulatedRates  = add(collateralType.accumulatedRates , accumulatedRates );
+        int rad  = mul(collateralType.debtAmount, accumulatedRates );
         dai[u]   = add(dai[u], rad);
         debt     = add(debt,   rad);
     }

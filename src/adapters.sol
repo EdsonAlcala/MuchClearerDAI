@@ -62,7 +62,7 @@ contract CDPEngineContract {
 contract TokenAdapter is LogEmitter, Permissioned {
 
     CDPEngineContract public CDPEngine;
-    bytes32 public ilk;
+    bytes32 public collateralType;
     SimpleToken public tokenCollateral;
     uint    public dec;
     uint    public DSRisActive;  // Access Flag
@@ -71,7 +71,7 @@ contract TokenAdapter is LogEmitter, Permissioned {
         authorizedAccounts[msg.sender] = true;
         DSRisActive = true;
         CDPEngine = CDPEngineContract(CDPEngine_);
-        ilk = ilk_;
+        collateralType = ilk_;
         tokenCollateral = SimpleToken(token_);
         dec = tokenCollateral.decimals();
     }
@@ -81,12 +81,12 @@ contract TokenAdapter is LogEmitter, Permissioned {
     function enableDSR(address usr, uint amount) external emitLog {
         require(DSRisActive, "TokenAdapter/not-DSRisActive");
         require(int(amount) >= 0, "TokenAdapter/overflow");
-        CDPEngine.slip(ilk, usr, int(amount));
+        CDPEngine.slip(collateralType, usr, int(amount));
         require(tokenCollateral.transferFrom(msg.sender, address(this), amount), "TokenAdapter/failed-transfer");
     }
     function disableDSR(address usr, uint amount) external emitLog {
         require(amount <= 2 ** 255, "TokenAdapter/overflow");
-        CDPEngine.slip(ilk, msg.sender, -int(amount));
+        CDPEngine.slip(collateralType, msg.sender, -int(amount));
         require(tokenCollateral.transfer(usr, amount), "TokenAdapter/failed-transfer");
     }
 }
@@ -94,14 +94,14 @@ contract TokenAdapter is LogEmitter, Permissioned {
 contract ETHAdapter is LogEmitter, Permissioned {
 
     CDPEngineContract public CDPEngine;
-    bytes32 public ilk;
+    bytes32 public collateralType;
     uint    public DSRisActive;  // Access Flag
 
     constructor(address CDPEngine_, bytes32 ilk_) public {
         authorizedAccounts[msg.sender] = true;
         DSRisActive = true;
         CDPEngine = CDPEngineContract(CDPEngine_);
-        ilk = ilk_;
+        collateralType = ilk_;
     }
     function cage() external emitLog onlyOwners {
         DSRisActive = false;
@@ -109,11 +109,11 @@ contract ETHAdapter is LogEmitter, Permissioned {
     function enableDSR(address usr) external payable emitLog {
         require(DSRisActive, "ETHAdapter/not-DSRisActive");
         require(int(msg.value) >= 0, "ETHAdapter/overflow");
-        CDPEngine.slip(ilk, usr, int(msg.value));
+        CDPEngine.slip(collateralType, usr, int(msg.value));
     }
     function disableDSR(address payable usr, uint amount) external emitLog {
         require(int(amount) >= 0, "ETHAdapter/overflow");
-        CDPEngine.slip(ilk, msg.sender, -int(amount));
+        CDPEngine.slip(collateralType, msg.sender, -int(amount));
         usr.transfer(amount);
     }
 }

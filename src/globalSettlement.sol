@@ -22,27 +22,27 @@ import "./commonFunctions.sol";
 
 contract CDPEngineContract {
     function dai(address) external view returns (uint256);
-    function ilks(bytes32 ilk) external returns (
+    function collateralTypes(bytes32 collateralType) external returns (
         uint256 debtAmount,
         uint256 accumulatedRates ,
         uint256 spot,
         uint256 line,
         uint256 dust
     );
-    function urns(bytes32 ilk, address urn) external returns (
+    function urns(bytes32 collateralType, address urn) external returns (
         uint256 ink,
         uint256 art
     );
     function debt() external returns (uint256);
     function move(address src, address dst, uint256 rad) external;
     function hope(address) external;
-    function flux(bytes32 ilk, address src, address dst, uint256 rad) external;
+    function flux(bytes32 collateralType, address src, address dst, uint256 rad) external;
     function grab(bytes32 i, address u, address v, address w, int256 dink, int256 dart) external;
     function suck(address u, address v, uint256 rad) external;
     function cage() external;
 }
 contract CatLike {
-    function ilks(bytes32) external returns (
+    function collateralTypes(bytes32) external returns (
         address liquidator,  // Liquidator
         uint256 liquidatorPenalty,  // Liquidation Penalty   [ray]
         uint256 liquidatorAmount   // Liquidation Quantity  [rad]
@@ -75,7 +75,7 @@ contract PipLike {
 
 contract Spotty {
     function par() external view returns (uint256);
-    function ilks(bytes32) external view returns (
+    function collateralTypes(bytes32) external view returns (
         PipLike pip,
         uint256 mat
     );
@@ -86,7 +86,7 @@ contract Spotty {
     This is the `GlobalSettlement` and it coordinates Global Settlement. This is an
     involved, stateful process that takes place over nine steps.
 
-    First we freeze the system and lock the prices for each ilk.
+    First we freeze the system and lock the prices for each collateralType.
 
     1. `cage()`:
         - freezes user entrypoints
@@ -94,8 +94,8 @@ contract Spotty {
         - starts cooldown period
         - stops pot collectRates
 
-    2. `cage(ilk)`:
-       - set the cage price for each `ilk`, reading off the price feed
+    2. `cage(collateralType)`:
+       - set the cage price for each `collateralType`, reading off the price feed
 
     We must process some system state before it is possible to calculate
     the final dai / collateral price. In particular, we need to determine
@@ -109,7 +109,7 @@ contract Spotty {
     We determine (a) by processing all under-collateralised CDPs with
     `skim`:
 
-    3. `skim(ilk, urn)`:
+    3. `skim(collateralType, urn)`:
        - cancels CDP debt
        - any excess collateral remains
        - backing collateral taken
@@ -133,7 +133,7 @@ contract Spotty {
            processing calls. This option allows dai holders to retrieve
            their collateral faster.
 
-           `skip(ilk, id)`:
+           `skip(collateralType, id)`:
             - cancel individual liquidator auctions in the `tend` (forward) phase
             - retrieves collateral and returns dai to bidder
             - `dent` (reverse) phase auctions can continue normally
@@ -146,7 +146,7 @@ contract Spotty {
     When a CDP has been processed and has no debt remaining, the
     remaining collateral can be removed.
 
-    5. `free(ilk)`:
+    5. `free(collateralType)`:
         - remove collateral from the caller's CDP
         - owner can call as needed
 
@@ -159,8 +159,8 @@ contract Spotty {
        - fixes the total outstanding supply of dai
        - may also require extra CDP processing to cover debtEngine surplus
 
-    7. `flow(ilk)`:
-        - calculate the `fix`, the cash price for a given ilk
+    7. `flow(collateralType)`:
+        - calculate the `fix`, the cash price for a given collateralType
         - adjusts the `fix` in the case of deficit / surplus
 
     At this point we have computed the final price for each collateral
@@ -177,8 +177,8 @@ contract Spotty {
     Finally, collateral can be obtained with `cash`. The bigger the bag,
     the more collateral can be released.
 
-    9. `cash(ilk, amount)`:
-        - exchange some dai from your bag for gems from a specific ilk
+    9. `cash(collateralType, amount)`:
+        - exchange some dai from your bag for gems from a specific collateralType
         - the number of gems is limited by how big your bag is
 */
 
@@ -198,7 +198,7 @@ contract GlobalSettlement is LogEmitter, Permissioned {
 
     mapping (bytes32 => uint256) public tag;  // cage price           [ray]
     mapping (bytes32 => uint256) public gap;  // collateral shortfall [amount]
-    mapping (bytes32 => uint256) public debtAmount;  // total debt per ilk   [amount]
+    mapping (bytes32 => uint256) public debtAmount;  // total debt per collateralType   [amount]
     mapping (bytes32 => uint256) public fix;  // final cash price     [ray]
 
     mapping (address => uint256)                      public bag;  // [amount]
@@ -264,21 +264,21 @@ contract GlobalSettlement is LogEmitter, Permissioned {
         pot.cage();
     }
 
-    function cage(bytes32 ilk) external emitLog {
+    function cage(bytes32 collateralType) external emitLog {
         require(!DSRisActive, "GlobalSettlement/still-DSRisActive");
-        require(tag[ilk] == 0, "GlobalSettlement/tag-ilk-already-defined");
-        (debtAmount[ilk],,,,) = CDPEngine.ilks(ilk);
-        (PipLike pip,) = spot.ilks(ilk);
+        require(tag[collateralType] == 0, "GlobalSettlement/tag-collateralType-already-defined");
+        (debtAmount[collateralType],,,,) = CDPEngine.collateralTypes(collateralType);
+        (PipLike pip,) = spot.collateralTypes(collateralType);
         // par is a ray, pip returns a amount
-        tag[ilk] = wdiv(spot.par(), uint(pip.read()));
+        tag[collateralType] = wdiv(spot.par(), uint(pip.read()));
     }
 
-    function skip(bytes32 ilk, uint256 id) external emitLog {
-        require(tag[ilk] != 0, "GlobalSettlement/tag-ilk-not-defined");
+    function skip(bytes32 collateralType, uint256 id) external emitLog {
+        require(tag[collateralType] != 0, "GlobalSettlement/tag-collateralType-not-defined");
 
-        (address flipV,,) = cat.ilks(ilk);
+        (address flipV,,) = cat.collateralTypes(collateralType);
         Seller liquidator = Seller(flipV);
-        (, uint accumulatedRates ,,,) = CDPEngine.ilks(ilk);
+        (, uint accumulatedRates ,,,) = CDPEngine.collateralTypes(collateralType);
         (uint bid, uint tokensForSale,,,, address usr,, uint tab) = liquidator.bids(id);
 
         CDPEngine.suck(address(debtEngine), address(debtEngine),  tab);
@@ -287,30 +287,30 @@ contract GlobalSettlement is LogEmitter, Permissioned {
         liquidator.yank(id);
 
         uint art = tab / accumulatedRates ;
-        debtAmount[ilk] = add(debtAmount[ilk], art);
+        debtAmount[collateralType] = add(debtAmount[collateralType], art);
         require(int(tokensForSale) >= 0 && int(art) >= 0, "GlobalSettlement/overflow");
-        CDPEngine.grab(ilk, usr, address(this), address(debtEngine), int(tokensForSale), int(art));
+        CDPEngine.grab(collateralType, usr, address(this), address(debtEngine), int(tokensForSale), int(art));
     }
 
-    function skim(bytes32 ilk, address urn) external emitLog {
-        require(tag[ilk] != 0, "GlobalSettlement/tag-ilk-not-defined");
-        (, uint accumulatedRates ,,,) = CDPEngine.ilks(ilk);
-        (uint ink, uint art) = CDPEngine.urns(ilk, urn);
+    function skim(bytes32 collateralType, address urn) external emitLog {
+        require(tag[collateralType] != 0, "GlobalSettlement/tag-collateralType-not-defined");
+        (, uint accumulatedRates ,,,) = CDPEngine.collateralTypes(collateralType);
+        (uint ink, uint art) = CDPEngine.urns(collateralType, urn);
 
-        uint owe = rmul(rmul(art, accumulatedRates ), tag[ilk]);
+        uint owe = rmul(rmul(art, accumulatedRates ), tag[collateralType]);
         uint amount = min(ink, owe);
-        gap[ilk] = add(gap[ilk], sub(owe, amount));
+        gap[collateralType] = add(gap[collateralType], sub(owe, amount));
 
         require(amount <= 2**255 && art <= 2**255, "GlobalSettlement/overflow");
-        CDPEngine.grab(ilk, urn, address(this), address(debtEngine), -int(amount), -int(art));
+        CDPEngine.grab(collateralType, urn, address(this), address(debtEngine), -int(amount), -int(art));
     }
 
-    function free(bytes32 ilk) external emitLog {
+    function free(bytes32 collateralType) external emitLog {
         require(!DSRisActive, "GlobalSettlement/still-DSRisActive");
-        (uint ink, uint art) = CDPEngine.urns(ilk, msg.sender);
+        (uint ink, uint art) = CDPEngine.urns(collateralType, msg.sender);
         require(art == 0, "GlobalSettlement/art-not-zero");
         require(ink <= 2**255, "GlobalSettlement/overflow");
-        CDPEngine.grab(ilk, msg.sender, msg.sender, address(debtEngine), -int(ink), 0);
+        CDPEngine.grab(collateralType, msg.sender, msg.sender, address(debtEngine), -int(ink), 0);
     }
 
     function thaw() external emitLog {
@@ -320,13 +320,13 @@ contract GlobalSettlement is LogEmitter, Permissioned {
         require(now >= add(when, wait), "GlobalSettlement/wait-not-finished");
         debt = CDPEngine.debt();
     }
-    function flow(bytes32 ilk) external emitLog {
+    function flow(bytes32 collateralType) external emitLog {
         require(debt != 0, "GlobalSettlement/debt-zero");
-        require(fix[ilk] == 0, "GlobalSettlement/fix-ilk-already-defined");
+        require(fix[collateralType] == 0, "GlobalSettlement/fix-collateralType-already-defined");
 
-        (, uint accumulatedRates ,,,) = CDPEngine.ilks(ilk);
-        uint256 amount = rmul(rmul(debtAmount[ilk], accumulatedRates ), tag[ilk]);
-        fix[ilk] = rdiv(mul(sub(amount, gap[ilk]), RAY), debt);
+        (, uint accumulatedRates ,,,) = CDPEngine.collateralTypes(collateralType);
+        uint256 amount = rmul(rmul(debtAmount[collateralType], accumulatedRates ), tag[collateralType]);
+        fix[collateralType] = rdiv(mul(sub(amount, gap[collateralType]), RAY), debt);
     }
 
     function pack(uint256 amount) external emitLog {
@@ -334,10 +334,10 @@ contract GlobalSettlement is LogEmitter, Permissioned {
         CDPEngine.move(msg.sender, address(debtEngine), mul(amount, RAY));
         bag[msg.sender] = add(bag[msg.sender], amount);
     }
-    function cash(bytes32 ilk, uint amount) external emitLog {
-        require(fix[ilk] != 0, "GlobalSettlement/fix-ilk-not-defined");
-        CDPEngine.flux(ilk, address(this), msg.sender, rmul(amount, fix[ilk]));
-        out[ilk][msg.sender] = add(out[ilk][msg.sender], amount);
-        require(out[ilk][msg.sender] <= bag[msg.sender], "GlobalSettlement/insufficient-bag-balance");
+    function cash(bytes32 collateralType, uint amount) external emitLog {
+        require(fix[collateralType] != 0, "GlobalSettlement/fix-collateralType-not-defined");
+        CDPEngine.flux(collateralType, address(this), msg.sender, rmul(amount, fix[collateralType]));
+        out[collateralType][msg.sender] = add(out[collateralType][msg.sender], amount);
+        require(out[collateralType][msg.sender] <= bag[msg.sender], "GlobalSettlement/insufficient-bag-balance");
     }
 }

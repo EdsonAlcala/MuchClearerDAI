@@ -20,9 +20,9 @@ contract Usr {
             revert(free, 32)
         }
     }
-    function can_frob(bytes32 ilk, address u, address v, address w, int dink, int dart) public returns (bool) {
+    function can_frob(bytes32 collateralType, address u, address v, address w, int dink, int dart) public returns (bool) {
         string memory sig = "frob(bytes32,address,address,address,int256,int256)";
-        bytes memory data = abi.encodeWithSignature(sig, ilk, u, v, w, dink, dart);
+        bytes memory data = abi.encodeWithSignature(sig, collateralType, u, v, w, dink, dart);
 
         bytes memory can_call = abi.encodeWithSignature("try_call(address,bytes)", CDPEngine, data);
         (bool ok, bytes memory success) = address(this).call(can_call);
@@ -30,9 +30,9 @@ contract Usr {
         ok = abi.decode(success, (bool));
         if (ok) return true;
     }
-    function can_fork(bytes32 ilk, address src, address dst, int dink, int dart) public returns (bool) {
+    function can_fork(bytes32 collateralType, address src, address dst, int dink, int dart) public returns (bool) {
         string memory sig = "fork(bytes32,address,address,int256,int256)";
-        bytes memory data = abi.encodeWithSignature(sig, ilk, src, dst, dink, dart);
+        bytes memory data = abi.encodeWithSignature(sig, collateralType, src, dst, dink, dart);
 
         bytes memory can_call = abi.encodeWithSignature("try_call(address,bytes)", CDPEngine, data);
         (bool ok, bytes memory success) = address(this).call(can_call);
@@ -40,11 +40,11 @@ contract Usr {
         ok = abi.decode(success, (bool));
         if (ok) return true;
     }
-    function frob(bytes32 ilk, address u, address v, address w, int dink, int dart) public {
-        CDPEngine.frob(ilk, u, v, w, dink, dart);
+    function frob(bytes32 collateralType, address u, address v, address w, int dink, int dart) public {
+        CDPEngine.frob(collateralType, u, v, w, dink, dart);
     }
-    function fork(bytes32 ilk, address src, address dst, int dink, int dart) public {
-        CDPEngine.fork(ilk, src, dst, dink, dart);
+    function fork(bytes32 collateralType, address src, address dst, int dink, int dart) public {
+        CDPEngine.fork(collateralType, src, dst, dink, dart);
     }
     function hope(address usr) public {
         CDPEngine.hope(usr);
