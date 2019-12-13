@@ -17,34 +17,34 @@ pragma solidity 0.5.12;
 
 import "./commonFunctions.sol";
 
-contract VatLike {
+contract CDPEngineContract {
     function file(bytes32, bytes32, uint) external;
 }
 
-contract PipLike {
-    function peek() external returns (bytes32, bool);
+contract PriceOracle {
+    function getPrice() external returns (bytes32, bool);
 }
 
-contract Spotter is LogEmitter {
+contract PriceRelayer is LogEmitter {
     // --- Auth ---
     mapping (address => uint) public authorizedAccounts;
     function addAuthorization(address guy) external emitLog onlyOwners { authorizedAccounts[guy] = 1;  }
     function removeAuthorization(address guy) external emitLog onlyOwners { authorizedAccounts[guy] = 0; }
     modifier onlyOwners {
-        require(authorizedAccounts[msg.sender] == 1, "Spotter/not-onlyOwnersorized");
+        require(authorizedAccounts[msg.sender] == 1, "PriceRelayer/not-onlyOwnersorized");
         _;
     }
 
     // --- Data ---
-    struct Ilk {
-        PipLike pip;
-        uint256 mat;
+    struct CDPInfo {
+        PriceOracleContract priceOracle;
+        uint256 liquidationRatio;
     }
 
-    mapping (bytes32 => Ilk) public ilks;
+    mapping (bytes32 => CDPType) public cdpInfos;
 
     VatLike public CDPEngine;
-    uint256 public par; // ref per dai
+    uint256 public targetRatio; // ref per dai
 
     uint256 public DSRisActive;
 
@@ -58,8 +58,8 @@ contract Spotter is LogEmitter {
     // --- Init ---
     constructor(address CDPEngine_) public {
         authorizedAccounts[msg.sender] = 1;
-        CDPEngine = VatLike(CDPEngine_);
-        par = ONE;
+        CDPEngine = CDPEngineContract(CDPEngine_);
+        targetRatio = ONE;
         DSRisActive = 1;
     }
 
@@ -74,28 +74,28 @@ contract Spotter is LogEmitter {
     }
 
     // --- Administration ---
-    function file(bytes32 ilk, bytes32 what, address pip_) external emitLog onlyOwners {
-        require(DSRisActive == 1, "Spotter/not-DSRisActive");
-        if (what == "pip") ilks[ilk].pip = PipLike(pip_);
-        else revert("Spotter/file-unrecognized-param");
+    function setVariable(bytes32 cdpType, bytes32 variableName, address priceOracleAddr) external emitLog onlyOwners {
+        require(DSRisActive == 1, "PriceRelayer/not-DSRisActive");
+        if (variableName == "priceOracleAddr") cdpInfos[cdpType].priceOracle = PriceOracle(priceOracleAddr);
+        else revert("PriceRelayer/file-unrecognized-param");
     }
-    function file(bytes32 what, uint data) external emitLog onlyOwners {
-        require(DSRisActive == 1, "Spotter/not-DSRisActive");
-        if (what == "par") par = data;
-        else revert("Spotter/file-unrecognized-param");
+    function setVariable(bytes32 variableName, uint _targetRatio) external emitLog onlyOwners {
+        require(DSRisActive == 1, "PriceRelayer/not-DSRisActive");
+        if (variableName == "targetRatio") targetRatio = _targetRatio;
+        else revert("PriceRelayer/file-unrecognized-param");
     }
-    function file(bytes32 ilk, bytes32 what, uint data) external emitLog onlyOwners {
-        require(DSRisActive == 1, "Spotter/not-DSRisActive");
-        if (what == "mat") ilks[ilk].mat = data;
-        else revert("Spotter/file-unrecognized-param");
+    function setVariable(bytes32 cdpType, bytes32 variableName, uint liquidationRatio) external emitLog onlyOwners {
+        require(DSRisActive == 1, "PriceRelayer/not-DSRisActive");
+        if (variableName == "liquidationRatio") cdpInfos[cdpType].liquidationRatio = liquidationRatio;
+        else revert("PriceRelayer/file-unrecognized-param");
     }
 
     // --- Update value ---
-    function poke(bytes32 ilk) external {
-        (bytes32 val, bool has) = ilks[ilk].pip.peek();
-        uint256 spot = has ? rdiv(rdiv(mul(uint(val), 10 ** 9), par), ilks[ilk].mat) : 0;
-        CDPEngine.file(ilk, "spot", spot);
-        emit Poke(ilk, val, spot);
+    function updatePrice(bytes32 ilk) external {
+        (bytes32 price, bool has) = cdpInfos[cdpType].PriceOracle.getPrice();
+        uint256 priceWithSafetyMargin = has ? rdiv(rdiv(mul(uint(price), 10 ** 9), targetRatio), liquidationRatio) : 0;
+        CDPEngine.file(CDPType, "spot", priceWithSafetyMargin);
+        emit updatePrice(CDPType, price, priceWithSafetyMargin);
     }
 
     function cage() external emitLog onlyOwners {
