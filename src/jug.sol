@@ -38,6 +38,7 @@ contract Jug is LogEmitter {
     }
 
     // --- Math ---
+    // computes z = ((x/b)^n)*b
     function rpow(uint x, uint n, uint b) internal pure returns (uint z) {
         assembly {
             switch x 
