@@ -20,7 +20,7 @@ If you never dwelved into the mess that is Maker's original DAI repository, I da
 - ~lib.sol~ -> commonFunctions.sol
 - ~join.sol~ -> adapters.sol
 - ~flip.sol~ -> collateralSeller.sol
-- ~flop.sol~ -> collateralBuyer.sol
+- ~flap.sol~ -> collateralBuyer.sol
 - ~vat.sol~ -> CDPEngine.sol
 
 Eventually we hope to rename all files, once we figure out what exactly *cat*, *flop*, *jug*, *spot* and *vow* are. 
