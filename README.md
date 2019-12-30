@@ -4,11 +4,14 @@
 
 > _Heartbleed (OpenSSL attack) existed for 10 years before it was found. Maker’s source code is notoriously hard to follow and a big complaint by a large portion of the Ethereum dev community. I have personally told them previously that I didn’t audit Maker’s contracts because it was too hard to read their code. - Micah Zoltu_
 
+Because we are writing the new financial system and not a Dr Seuss book.
+
 We believe in building a new open, more transparent financial system for the world. But "open" is more than just "open source", it also requires the language to be the most acessible possible, that allows the largest possible amount of eyes to look into it. Maker's DAI is now the most popular open stablecoin and the basis of most of the new DEFI movement being built in ethereum — yet, most of the code is inscrutable, choosing to rename common concepts (a token is called a _gem_, the act of selling those gems is called _flap_) and to focus on short, 3-4 letter variable names (_wad_, _guy_, _vat_, _kick_). The code has almost no comments—ironically, most exceptions are to explain their own vocabulary.
 
 This is not meant to be a fork of DAI, but a repository that copies the same current functionality of the main repo, but tries to rename them to more acessible terms. We avoid creating our own terms, but rather often use the names that Maker calls them, but to use them as the main variable names. Currently it's a work mostly of doing a lot of Find & Replace on the project overall. We expect a lot of functionality and tests to be broken, so don't expect to be able to run this out of the box. This is a volunteer work in progress.
 
 ### Comments
+
 The code offers no comments, but it really really should. The issue is that comments require code functionality to be clear.
 
 If you never dwelved into the mess that is Maker's original DAI repository, I dare you try now, by going into any file in [this folder](https://github.com/alexvansande/MuchClearerDAI/tree/master/src) and trying to add comments on what the code is supposed to do.
@@ -19,34 +22,36 @@ If you never dwelved into the mess that is Maker's original DAI repository, I da
 - ~end.sol~ -> globalSettlement.sol
 - ~lib.sol~ -> commonFunctions.sol
 - ~join.sol~ -> adapters.sol
-- ~flip.sol~ -> collateralSeller.sol
-- ~flap.sol~ -> collateralBuyer.sol
+- ~flip.sol~ -> collateralAuction.sol
+- ~flap.sol~ -> surplusAuction.sol
 - ~vat.sol~ -> CDPEngine.sol
+- ~cat.sol~ -> liquidations.sol
+- ~flop.sol~ -> debtAuction.sol
+- ~jug.sol~ -> stabilityFees.sol
+- ~spot.sol~ -> oracle.sol
+- ~vow.sol~ -> settlement.sol
 
-Eventually we hope to rename all files, once we figure out what exactly *cat*, *flop*, *jug*, *spot* and *vow* are. 
+### Other remarkable changes
 
-
-### Other remarkable changes 
-
-* Some uint variables that only used 0 or 1 values were transformed into bools (`uint256 ward`, which is a flag to check if an account is authorized is now `bool authorizedAccounts`, `uint256 live`, a flag to check if DSR is active is now `bool DSRisActive`)
-* the library contract Note is now LogEmitter (because its purpose is to emit logs) and now was expanded to include the common `auth` pattern.
-* Gems are renamed to Tokens wherever they are found. And so are derivatives: so `gemLike`, a contract pattern to have a very simple token is therefore called `SimpleToken` and so on.
-* Flip and Flap both are auctions that exchange Collateral Tokens for DAI, in opposite directions. Assuming DAI takes the place of an usual currency, we can name these auctions the much more commonly used verb in english, "to buy" and "to sell".
+- Some uint variables that only used 0 or 1 values were transformed into bools (`uint256 ward`, which is a flag to check if an account is authorized is now `bool authorizedAccounts`, `uint256 live`, a flag to check if DSR is active is now `bool DSRisActive`)
+- the library contract Note is now LogEmitter (because its purpose is to emit logs) and now was expanded to include the common `auth` pattern.
+- Gems are renamed to Tokens wherever they are found. And so are derivatives: so `gemLike`, a contract pattern to have a very simple token is therefore called `SimpleToken` and so on.
+- Flip and Flap both are auctions that exchange Collateral Tokens for DAI, in opposite directions. Assuming DAI takes the place of an usual currency, we can name these auctions the much more commonly used verb in english, "to buy" and "to sell".
 
 You can see a much longer list of changes in [this link](https://github.com/makerdao/dss/compare/master...alexvansande:master)
 This is a work in progress and we welcome your feedback!
 
+**Don't know even where to start?** CDPEngine (formerly vat) is described by maker as the unchangeable constitution of the Maker system, and is also one of the currently best annotated files. You can understand a lot of how DAI works from there
 
 ## Sources
 
 Besides the source code itself, here are some resources provided by Maker for understanding their own code:
 
-* [Maker Protocol 101](https://docs.makerdao.com/maker-protocol-101)
-* [Glossary](https://docs.makerdao.com/other-documentation/system-glossary) (you know, because why make the code clearer in the first place?)
-* [Smart contract annotations](https://docs.makerdao.com/other-documentation/smart-contract-annotations) which is, for some reason a complete different website you need to add to check. Would be cool if github allows "annotations" to be done directly on the code as some sort of, say "comment", wouldn't it?
+- [Maker Protocol 101](https://docs.makerdao.com/maker-protocol-101)
+- [Glossary](https://docs.makerdao.com/other-documentation/system-glossary) (you know, because why make the code clearer in the first place?)
+- [Smart contract annotations](https://docs.makerdao.com/other-documentation/smart-contract-annotations) which is, for some reason a complete different website you need to add to check. Would be cool if github allows "annotations" to be done directly on the code as some sort of, say "comment", wouldn't it?
 
-----------
-
+---
 
 # Multi Collateral Dai
 
