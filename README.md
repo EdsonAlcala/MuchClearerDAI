@@ -37,6 +37,16 @@ You can see a much longer list of changes in [this link](https://github.com/make
 This is a work in progress and we welcome your feedback!
 
 
+## Sources
+
+Besides the source code itself, here are some resources provided by Maker for understanding their own code:
+
+* [Maker Protocol 101](https://docs.makerdao.com/maker-protocol-101)
+* [Glossary](https://docs.makerdao.com/other-documentation/system-glossary) (you know, because why make the code clearer in the first place?)
+* [Smart contract annotations](https://docs.makerdao.com/other-documentation/smart-contract-annotations) which is, for some reason a complete different website you need to add to check. Would be cool if github allows "annotations" to be done directly on the code as some sort of, say "comment", wouldn't it?
+
+----------
+
 
 # Multi Collateral Dai
 
